@@ -26,6 +26,20 @@ _ENTRIES: list[tuple[str, MuscleGroup, list[str], list[MuscleGroup]]] = [
      [MuscleGroup.triceps, MuscleGroup.side_delt]),
     ("Decline Push-Up", MuscleGroup.upper_chest, [],
      [MuscleGroup.triceps, MuscleGroup.side_delt]),
+    # ch03 horizontal push: primary "Chest, anterior delts", secondary
+    # "Triceps ..., middle delts (incline)". Neither `chest` nor a front-delt
+    # value exists in MuscleGroup, so `upper_chest` is the nearest available
+    # primary — a KNOWN DEVIATION from the chart, not a citation. Middle delts
+    # are the incline case per the chart, so flat bench credits triceps only.
+    ("Bench Press", MuscleGroup.upper_chest,
+     ["Barbell Bench Press", "Flat Bench Press", "Flat Bench",
+      "Dumbbell Bench Press", "Chest Press", "Machine Chest Press"],
+     [MuscleGroup.triceps]),
+    # ch03 fly: primary "Chest", secondary "Anterior delts". Same deviation on
+    # the primary; the secondary has no representable value, so it stays empty
+    # rather than borrowing side_delt, which the chart does not say.
+    ("Fly", MuscleGroup.upper_chest,
+     ["Cable Fly", "Dumbbell Fly", "Chest Fly", "Machine Fly", "Pec Deck"], []),
     # Vertical push — delts primary (repo lumps delt heads), triceps secondary
     ("Shoulder Press", MuscleGroup.side_delt,
      ["Barbell Shoulder Press", "Machine Shoulder Press", "Dumbbell Shoulder Press",
@@ -34,10 +48,19 @@ _ENTRIES: list[tuple[str, MuscleGroup, list[str], list[MuscleGroup]]] = [
     ("Lateral Raise", MuscleGroup.side_delt,
      ["Cable Lateral Raise", "Machine Lateral Raise", "Dumbbell Lateral Raise"], []),
     ("Reverse Fly", MuscleGroup.rear_delt, ["Machine Reverse Fly"], []),
+    # HEURISTIC — "face pull" appears nowhere in the vendored training book
+    # (zero grep hits); the movement-pattern chart has no row for it. Treated
+    # as ch03's "Isolation -> target muscle" row. No secondary is claimed.
+    ("Face Pull", MuscleGroup.rear_delt, ["Cable Face Pull", "Rope Face Pull"], []),
     # Vertical pull — lats primary, rear delts + biceps secondary
     ("Pull-Up", MuscleGroup.lats, ["Pull Up", "Close Grip Pull-Up"],
      [MuscleGroup.rear_delt, MuscleGroup.biceps]),
     ("Straight Arm Pulldown", MuscleGroup.lats, [], [MuscleGroup.triceps]),
+    # ch03 vertical pull ("chins, lat pull"): primary "Lats, biceps",
+    # secondary "Rear delts" — mapped the same way Pull-Up already is.
+    ("Lat Pulldown", MuscleGroup.lats,
+     ["Pulldown", "Cable Pulldown", "Wide Grip Pulldown", "Neutral Grip Pulldown"],
+     [MuscleGroup.rear_delt, MuscleGroup.biceps]),
     # Horizontal pull — scapular retractors/lats primary, rear delts + biceps secondary
     ("Row", MuscleGroup.mid_back,
      ["Penlay Row", "Pendlay Row", "Cable Row", "Neutral Grip Cable Row",
@@ -114,6 +137,9 @@ _KEYWORD_RULES: list[tuple[str, MuscleGroup]] = [
     ("lateral", MuscleGroup.side_delt),
     ("rear delt", MuscleGroup.rear_delt),
     ("reverse fly", MuscleGroup.rear_delt),
+    ("face pull", MuscleGroup.rear_delt),  # before "pull", which would win otherwise
+    ("fly", MuscleGroup.upper_chest),      # after "reverse fly" for the same reason
+    ("bench", MuscleGroup.upper_chest),
     ("row", MuscleGroup.mid_back),
     ("pull", MuscleGroup.lats),
     ("curl", MuscleGroup.biceps),
