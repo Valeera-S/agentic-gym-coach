@@ -27,24 +27,53 @@ anywhere: Epley at 12+ reps is badly off, and a number shown beside the
 correctly-null est_1rm_kg would read as usable.
 
 trend_direction: est-1RM trend across window halves when qualifying heavy
-sets exist (±2%), else hard-set totals (strict compare). `stalled` = plateau
-or down with >=4 sessions — a flag, not a verdict: the coach must run the
-plateau flowchart (free-wins → recovery checklist) before acting on it.
+sets exist in both halves (±2%). Otherwise — the usual hypertrophy case, most
+sets in the 6-12 range (ch03) — direction is judged on PERFORMANCE per
+exercise identity, the double-progression semantics of ch04:
+  up   = more load at >= the same reps, or more reps at the same load
+  down = the reverse;  anything else = flat
+Each identity's top set per half (heaviest load, most reps at that load) is
+compared; bodyweight sets count as load 0, so reps decide. A weight that was
+simply not recorded is NOT zero: such sets are left out of the comparison
+(never interpolate a load). A load step (heavier, reps back down — the second
+half of double progression) counts as `up` when the heavier top set is still a
+working set (EVERY set at the heavier load >= 6 reps) and its Epley estimate
+does not drop; symmetric for `down` (HEURISTIC, human decisions 2026-10-05:
+Epley is used only as a relative comparison inside one identity and is never
+reported as a 1RM). Bodyweight exercises get no load step — their true load
+includes a body mass the system does not have per session — so they compare
+by dominance only (more added load at >= the reps, or more reps). Only exercises for
+which the muscle is a chart PRIMARY decide its direction (overlap credit counts
+toward volume, never toward progression). Per muscle, whichever of up / down
+carries more effective sets wins; equal (or all flat) -> plateau; nothing
+comparable across both halves -> unknown. A set-count change alone is a volume
+change, never progression. `stalled` = plateau or down with >=4 sessions — a
+flag, not a verdict: the coach must run the plateau flowchart (free-wins →
+recovery checklist) before acting on it.
 
-Contract: <50ms on 10K-row synthetic set. Deterministic given the logged data.
+Contract: <100ms on a 10K-row synthetic set (AGENTS.md checklist; -m slow guards).
+Deterministic given the logged data.
 """
 
 from __future__ import annotations
 
+import math
 from datetime import date, timedelta
 
 import polars as pl
 
-from models import MuscleGroup, TrendDirection, TrendReport
-from models.exercise_catalog import credited_muscles, exercises_crediting, resolve_name
+from models import LoadType, MuscleGroup, TrendDirection, TrendReport
+from models.exercise_catalog import (
+    credited_muscles,
+    default_load_type,
+    exercises_crediting,
+    lookup_key,
+    progression_muscles,
+    resolve_name,
+)
 
 from .init import get_duckdb
-from .metrics import epley_expr, qualifies_for_est_1rm
+from .metrics import epley_expr, est_1rm, qualifies_for_est_1rm
 
 
 def _fetch_entries(start: date, end: date) -> pl.DataFrame:
@@ -101,6 +130,105 @@ def hard_sets_by_muscle(start: date, end: date) -> dict[str, float]:
     return {k: float(v) for k, v in out.items()}
 
 
+def _top_set(sets: list[tuple[float, float]]) -> tuple[float, float]:
+    """Heaviest load, and the most reps achieved at that load."""
+    top_load = max(load for load, _ in sets)
+    return top_load, max(reps for load, reps in sets if load == top_load)
+
+
+def _beats(sets: list[tuple[float, float]], ref: tuple[float, float]) -> bool:
+    """Some set does more load at >= the reps, or more reps at >= the load."""
+    return any(load >= ref[0] and reps >= ref[1] and (load > ref[0] or reps > ref[1])
+               for load, reps in sets)
+
+
+# HEURISTIC (human decision 2026-10-05) — the load step of double progression:
+# heavier, with reps back down, is progress while the heavier set is still a
+# working set and its Epley estimate (skills/metrics.py) does not drop. Epley
+# is only a relative yardstick between two sets of ONE exercise here — never
+# reported as a 1RM, so its error at higher reps does not reach the user.
+_LOAD_STEP_MIN_REPS = 6  # the lower edge of a hypertrophy working set (ch03); human decision
+
+
+def _load_step(heavier_half: list[tuple[float, float]], heavier: tuple[float, float],
+               lighter: tuple[float, float]) -> bool:
+    """The heavier half's top set is a load step over the lighter half's: more
+    load, EVERY set at that load still >= 6 reps, Epley not lower (equal
+    counts — compared with a float tolerance so 20 lb x 15 vs 25 lb x 6, both
+    30, is not lost to rounding)."""
+    if heavier[0] <= lighter[0]:
+        return False
+    if min(r for load, r in heavier_half if load == heavier[0]) < _LOAD_STEP_MIN_REPS:
+        return False
+    h, l = est_1rm(*heavier), est_1rm(*lighter)
+    return h >= l or math.isclose(h, l, rel_tol=1e-9, abs_tol=1e-9)
+
+
+def _is_bodyweight(name: str, stored_load_type: str | None) -> bool:
+    """Whether a null weight on this row means 'no external load' (counts as 0)
+    rather than 'not recorded' (unknown). Legacy rows (no stored load_type)
+    fall back to the identity's catalog default."""
+    if stored_load_type is not None:
+        return stored_load_type == LoadType.bodyweight.value
+    return default_load_type(name) is LoadType.bodyweight
+
+
+def _performance_direction(df: pl.DataFrame, muscle: str,
+                           first_dates: set) -> tuple[TrendDirection, dict[str, str]]:
+    """Double-progression direction for `muscle` from per-identity top sets."""
+    halves: dict[str, tuple[list, list]] = {}
+    weight: dict[str, float] = {}
+    shown: dict[str, str] = {}
+    bodyweight_keys: set[str] = set()
+    for d, name, ident, mg, sets, reps, loads, mult, load_type in df.select(
+            "date", "name", "identity", "mg", "sets", "reps", "weight_kg", "form_mult",
+            "load_type").iter_rows():
+        if muscle not in progression_muscles(name, mg):
+            continue  # overlap credit: volume only, never progression
+        bodyweight = _is_bodyweight(name, load_type)
+        reps = reps or []
+        loads = loads or [None] * len(reps)
+        pairs = [(0.0 if w is None else w, r) for r, w in zip(reps, loads)
+                 if r is not None and (w is not None or bodyweight)]
+        # unknown names group case-insensitively ("meadows row" == "Meadows Row")
+        key = ident if resolve_name(name) else lookup_key(name)
+        shown.setdefault(key, ident)
+        # The load-step exclusion is per IDENTITY: a bodyweight exercise stays
+        # one even when the caller declares an added-load reading ("total" for
+        # a belt-weighted pull-up) — its true load still includes body mass.
+        if bodyweight or default_load_type(name) is LoadType.bodyweight:
+            bodyweight_keys.add(key)
+        first, second = halves.setdefault(key, ([], []))
+        (first if d in first_dates else second).extend(pairs)
+        weight[key] = weight.get(key, 0.0) + (sets or 0) * mult
+
+    verdicts: dict[str, str] = {}
+    up_sets = down_sets = 0.0
+    for key, (first, second) in sorted(halves.items()):
+        if not first or not second:
+            continue  # not done (with a recorded load) in both halves: nothing to compare
+        ident = shown[key]
+        t1, t2 = _top_set(first), _top_set(second)
+        up, down = _beats(second, t1), _beats(first, t2)
+        if key not in bodyweight_keys:  # bodyweight: dominance only (human decision)
+            up = up or _load_step(second, t2, t1)
+            down = down or _load_step(first, t1, t2)
+        verdict = "up" if up and not down else "down" if down and not up else "flat"
+        verdicts[ident] = verdict
+        if verdict == "up":
+            up_sets += weight[key]
+        elif verdict == "down":
+            down_sets += weight[key]
+
+    if not verdicts:
+        return TrendDirection.unknown, verdicts
+    if up_sets > down_sets:
+        return TrendDirection.up, verdicts
+    if down_sets > up_sets:
+        return TrendDirection.down, verdicts
+    return TrendDirection.plateau, verdicts
+
+
 def get_specialization_trend(
     muscle: MuscleGroup, window_days: int = 28, end_date: date | None = None
 ) -> TrendReport:
@@ -122,7 +250,8 @@ def get_specialization_trend(
             muscle=muscle, window_days=window_days, effective_volume=0.0,
             avg_rpe=None, est_1rm_kg=None, stalled=False,
             trend_direction=TrendDirection.unknown, sessions_in_window=0,
-            detail={"load_type_unknown_sets": 0, "unloaded_sets": 0, "overlap_sets": 0.0},
+            detail={"load_type_unknown_sets": 0, "unloaded_sets": 0, "overlap_sets": 0.0,
+                    "direction_basis": None, "identity_directions": {}},
         )
 
     df = _with_form_mult(df)
@@ -159,6 +288,8 @@ def get_specialization_trend(
     # --- trend across first vs second half of the window (by date) ---------
     sessions = df["date"].unique().sort().len()
     trend_direction = TrendDirection.unknown
+    direction_basis: str | None = None
+    identity_directions: dict[str, str] = {}
     if sessions >= 4:
         dates = df["date"].unique().sort()
         mid = dates.len() // 2
@@ -179,19 +310,11 @@ def get_specialization_trend(
                 trend_direction = TrendDirection.down
             else:
                 trend_direction = TrendDirection.plateau
+            direction_basis = "est_1rm"
         else:
-            tf = df.filter(in_first).select(
-                (pl.col("sets") * pl.col("form_mult")).sum()).item() or 0.0
-            ts = df.filter(~in_first).select(
-                (pl.col("sets") * pl.col("form_mult")).sum()).item() or 0.0
-            if tf == 0 and ts == 0:
-                trend_direction = TrendDirection.unknown
-            elif ts > tf:
-                trend_direction = TrendDirection.up
-            elif ts < tf:
-                trend_direction = TrendDirection.down
-            else:
-                trend_direction = TrendDirection.plateau
+            trend_direction, identity_directions = _performance_direction(
+                df, muscle.value, first_dates)
+            direction_basis = "performance"
 
     stalled = trend_direction in (TrendDirection.plateau, TrendDirection.down)
 
@@ -207,5 +330,7 @@ def get_specialization_trend(
             "load_type_unknown_sets": load_type_unknown,
             "unloaded_sets": unloaded,
             "overlap_sets": float(overlap_sets),
+            "direction_basis": direction_basis,  # est_1rm | performance | None (<4 sessions)
+            "identity_directions": identity_directions,  # performance basis only
         },
     )

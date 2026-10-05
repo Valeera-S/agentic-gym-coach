@@ -307,6 +307,26 @@ def _repo(book: BookMuscle) -> MuscleGroup:
     return mapped
 
 
+def chart_primaries(name: str, target: MuscleGroup | None = None) -> frozenset[MuscleGroup]:
+    """Every muscle the chart lists as PRIMARY for an identity's row.
+
+    Isolation: the target. Otherwise the row's primaries plus a conditional
+    primary ("triceps (close grip/dips primary)"), minus anything a documented
+    exception withholds. Used to decide which exercises speak for a muscle's
+    progression (trend direction) — overlap credit counts toward volume only.
+    """
+    pattern = EXERCISE_PATTERN[name]
+    if pattern is MovementPattern.isolation:
+        if target is None:
+            raise ValueError(f"isolation exercise {name!r} needs a target muscle")
+        return frozenset({target})
+    row = CH03_COUNTING_CHART[pattern]
+    exc = DOCUMENTED_EXCEPTIONS.get(name)
+    book = set(row.primary) | ({exc.primary} if exc and exc.primary else set())
+    book -= exc.drop if exc else frozenset()
+    return frozenset(_repo(m) for m in book)
+
+
 def chart_credit(name: str, target: MuscleGroup | None = None
                  ) -> tuple[MuscleGroup, frozenset[MuscleGroup]]:
     """(primary, every credited muscle) for one catalog identity, from the chart.

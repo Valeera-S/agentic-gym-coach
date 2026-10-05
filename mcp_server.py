@@ -112,7 +112,7 @@ def coach_recovery(date: str | None = None) -> dict:
 def coach_trend(muscle: str,
                 window_days: int = coach_tools.DEFAULT_TREND_WINDOW_DAYS,
                 end_date: str | None = None) -> dict:
-    """Effective hard sets, avg RPE, est 1RM (≤6-rep sets), trend direction, and stall flag for a muscle group over a window (detail block: tonnage = total external load, x2 for per_hand/per_side readings; load_type_unknown_sets; unloaded/overlap sets)."""
+    """Effective hard sets, avg RPE, est 1RM (≤6-rep sets), trend direction (est-1RM when heavy sets exist in both halves, else per-exercise performance: more load at >= the same reps, more reps at the same load, or a load step whose heavier sets all stay >= 6 reps without a lower Epley estimate — HEURISTIC, never reported; bodyweight exercises compare by dominance only; unlogged weights are unknown, never 0), and stall flag for a muscle group over a window (detail block: tonnage = total external load, x2 for per_hand/per_side readings; load_type_unknown_sets; unloaded/overlap sets)."""
     return _run("trend", {"muscle": muscle, "window_days": window_days, "end_date": end_date})
 
 

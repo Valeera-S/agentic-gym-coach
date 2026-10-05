@@ -38,7 +38,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .doctrine_ch03 import EXERCISE_PATTERN, chart_credit
+from .doctrine_ch03 import EXERCISE_PATTERN, chart_credit, chart_primaries
 from .enums import LoadType, MuscleGroup, MuscleSource
 
 PH, PS, TOT, MS, BW = (LoadType.per_hand, LoadType.per_side, LoadType.total,
@@ -259,6 +259,25 @@ def credited_muscles(name: str, stored_primary: str | None) -> set[str]:
 def default_load_type(name: str) -> LoadType | None:
     canon = resolve_name(name)
     return CATALOG[canon].load_type if canon else None
+
+
+# The chart's primary set per identity — which exercises decide a muscle's
+# progression direction (overlap credit counts toward volume only).
+CHART_PRIMARIES: dict[str, frozenset[MuscleGroup]] = {
+    e.name: chart_primaries(e.name, e.target) for e in _ENTRIES
+}
+
+
+def progression_muscles(name: str, stored_primary: str | None) -> set[str]:
+    """Muscles whose progression a logged exercise speaks for: its identity's
+    chart primaries; for a name the catalog does not know, the stored primary
+    (the only muscle it is credited to)."""
+    canon = resolve_name(name)
+    if canon:
+        return {m.value for m in CHART_PRIMARIES[canon]}
+    if stored_primary and stored_primary != MuscleGroup.unclassified.value:
+        return {stored_primary}
+    return set()
 
 
 _FULL_CREDIT: dict[str, frozenset[MuscleGroup]] = {
