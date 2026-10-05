@@ -39,7 +39,15 @@ from .profile import (
     UserProfile,
     Weekday,
 )
-from .session import AnomalyFlag, ExerciseModel, LogConfirmation, SessionInput, SessionModel
+from .session import (
+    AnomalyFlag,
+    ExerciseDetail,
+    ExerciseModel,
+    LogConfirmation,
+    SessionDetail,
+    SessionInput,
+    SessionModel,
+)
 from .snapshot import PhaseSnapshot, RecoveryScore, SessionGap, TrendReport, VisualDelta
 from .working_memory import WorkingMemoryState
 
@@ -72,7 +80,9 @@ __all__ = [
     "InjuryStatus",
     "SafetyResult",
     "AnomalyFlag",
+    "ExerciseDetail",
     "ExerciseModel",
+    "SessionDetail",
     "LogConfirmation",
     "SessionInput",
     "SessionModel",

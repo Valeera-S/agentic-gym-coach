@@ -130,8 +130,20 @@ def coach_intake_status() -> dict:
 
 @mcp.tool()
 def coach_sessions(limit: int = coach_tools.DEFAULT_SESSIONS_LIMIT) -> dict:
-    """List recent sessions (id, date, phase, pre_recovery_score, post_feedback, kind)."""
+    """List recent sessions (id, date, phase, pre_recovery_score, post_feedback, kind, needs_review = number of exercises still needing review). Lean by design — use coach_session_detail for the exercises."""
     return _run("sessions", {"limit": limit})
+
+
+@mcp.tool()
+def coach_session_detail(session_id: str | None = None, date: str | None = None) -> dict:
+    """Read back logged session(s) in full — give exactly ONE of session_id or date (a date may hold several sessions).
+
+    Returns {sessions: [...]}: every exercise with its identity and raw_name as typed, sets/reps/rpe,
+    weight_kg plus the user's own numbers (weight_as_entered + unit_as_entered), load_type
+    (load_type_unknown when not recorded), muscle_group + muscle_source, and needs_review with the reason.
+    Unknown id or date -> invalid_input.
+    """
+    return _run("session_detail", {"session_id": session_id, "date": date})
 
 
 @mcp.tool()

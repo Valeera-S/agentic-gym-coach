@@ -190,3 +190,48 @@ class LogConfirmation(BaseModel):
     date: date
     anomaly_flags: list[AnomalyFlag] = Field(default_factory=list)
     message: str = "session logged"
+
+
+class ExerciseDetail(BaseModel):
+    """One logged exercise exactly as stored (read-back, coach_session_detail).
+
+    Stored values are reported as-is — vocabulary fields are plain strings so
+    a read never fails on what an older version stored. Provenance fields
+    (raw_name, muscle_source, load_type, entered_*) are None on rows logged
+    before migration 0003, meaning "unknown".
+    """
+
+    name: str                                # canonical identity (or the raw name if unmapped)
+    raw_name: str | None = None              # what the caller typed
+    muscle_group: str | None = None          # stored primary
+    muscle_source: str | None = None         # catalog | keyword | caller | unclassified
+    needs_review: bool = False               # derived from the stored muscle_source
+    review_detail: str | None = None         # why, when needs_review
+    sets: int | None = None
+    reps: list[float | None] = Field(default_factory=list)
+    rpe: list[float | None] = Field(default_factory=list)
+    weight_kg: list[float | None] = Field(default_factory=list)
+    load_type: str | None = None             # per_hand | per_side | total | machine_stack | bodyweight
+    load_type_unknown: bool = True           # no load_type stored: tonnage counts it as read
+    weight_as_entered: list[float | None] = Field(default_factory=list)  # the user's own numbers
+    unit_as_entered: str = "kg"              # their unit ('kg' for weight_kg callers)
+    entered_weight: list[float | None] | None = None  # stored weight+unit form, if used
+    entered_unit: str | None = None
+    tempo: str | None = None
+    form_quality: int | None = None
+    pain_flag: bool | None = None
+    notes: str | None = None
+
+
+class SessionDetail(BaseModel):
+    """One logged session in full — return of skills.sessions.get_session_detail()."""
+
+    id: UUID
+    date: date
+    phase: str | None = None
+    kind: str = "training"
+    pre_recovery_score: int | None = None
+    post_feedback: str | None = None
+    created_at: datetime | None = None
+    exercises: list[ExerciseDetail] = Field(default_factory=list)
+    needs_review_count: int = 0

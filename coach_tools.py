@@ -108,15 +108,18 @@ def cmd_intake_status(args: dict):
 
 
 def cmd_sessions(args: dict):
-    from skills.init import get_duckdb
+    from skills.sessions import list_sessions
     limit = _int_arg(args, "limit", DEFAULT_SESSIONS_LIMIT, minimum=0)
-    rows = get_duckdb().execute(
-        "SELECT id, date, phase, pre_recovery_score, post_feedback, kind "
-        "FROM sessions ORDER BY date DESC, created_at DESC LIMIT ?",
-        [limit],
-    ).fetchall()
-    cols = ["id", "date", "phase", "pre_recovery_score", "post_feedback", "kind"]
-    return [dict(zip(cols, r)) for r in rows]
+    return list_sessions(limit)
+
+
+def cmd_session_detail(args: dict):
+    from skills.sessions import get_session_detail
+    session_id, on_date = args.get("session_id"), args.get("date")
+    if session_id is not None and not isinstance(session_id, str):
+        raise ValueError("session_id must be a string UUID")
+    details = get_session_detail(session_id=session_id, on_date=_parse_date(on_date))
+    return {"sessions": [d.model_dump(mode="json") for d in details]}
 
 
 def cmd_injuries_list(args: dict):
@@ -203,6 +206,7 @@ _HANDLERS = {
     "snapshot": cmd_snapshot,
     "intake_status": cmd_intake_status,
     "sessions": cmd_sessions,
+    "session_detail": cmd_session_detail,
     "injuries_list": cmd_injuries_list,
     "injuries_seed": cmd_injuries_seed,
     "profile_get": cmd_profile_get,
