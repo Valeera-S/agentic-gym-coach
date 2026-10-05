@@ -104,6 +104,9 @@ def hard_sets_by_muscle(start: date, end: date) -> dict[str, float]:
 def get_specialization_trend(
     muscle: MuscleGroup, window_days: int = 28, end_date: date | None = None
 ) -> TrendReport:
+    if muscle is MuscleGroup.unclassified:
+        raise ValueError("'unclassified' is not a muscle: its sets credit no muscle's "
+                         "volume or trend; map the exercise instead")
     # end_date lets the coach analyze/backtest historical slices; default today.
     anchor = end_date or date.today()
     start = anchor - timedelta(days=window_days)

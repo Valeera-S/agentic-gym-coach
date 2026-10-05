@@ -6,13 +6,14 @@ from .enums import (
     InjuryState,
     LoadType,
     MuscleGroup,
+    MuscleSource,
     PainLocation,
     PhaseType,
     SessionKind,
     TrendDirection,
     WeightUnit,
 )
-from .exercise_catalog import SECONDARY_OVERLAP, canonicalize
+from .exercise_catalog import SECONDARY_OVERLAP, canonicalize, classify
 from .injury import InjurySeedResult, InjuryStatus, SafetyResult
 from .intake import (
     INTAKE_CHECKLIST,
@@ -47,9 +48,11 @@ __all__ = [
     "DecisionEventType",
     "InjuryState",
     "LoadType",
+    "MuscleSource",
     "WeightUnit",
     "SECONDARY_OVERLAP",
     "canonicalize",
+    "classify",
     "MuscleGroup",
     "PainLocation",
     "PhaseType",

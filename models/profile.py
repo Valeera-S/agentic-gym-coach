@@ -127,6 +127,12 @@ class NoteKind(str, Enum):
     observation = "observation"
 
 
+def _no_sentinel(muscles: list[MuscleGroup]) -> list[MuscleGroup]:
+    if MuscleGroup.unclassified in muscles:
+        raise ValueError("'unclassified' is the unmapped-exercise sentinel, not a muscle")
+    return muscles
+
+
 class Goal(BaseModel):
     kind: GoalKind
     physique_target: PhysiqueTarget | None = None
@@ -134,6 +140,11 @@ class Goal(BaseModel):
     metric: str | None = None        # e.g. "first pull-up", "2x BW squat"
     deadline: date | None = None
     notes: str | None = None
+
+    @field_validator("target_muscles")
+    @classmethod
+    def _real_muscles_only(cls, v: list[MuscleGroup]) -> list[MuscleGroup]:
+        return _no_sentinel(v)
 
 
 class UserProfile(BaseModel):
@@ -189,6 +200,11 @@ class UserProfile(BaseModel):
     pcos: bool | None = None
     oligomenorrhea: bool | None = None
     updated_at: datetime | None = None
+
+    @field_validator("priority_muscles")
+    @classmethod
+    def _real_priorities_only(cls, v: list[MuscleGroup]) -> list[MuscleGroup]:
+        return _no_sentinel(v)
 
 
 class MemoryNote(BaseModel):

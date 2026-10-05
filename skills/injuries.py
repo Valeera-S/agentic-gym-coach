@@ -36,8 +36,8 @@ def _row_to_model(row: tuple, *, with_id: bool = False) -> InjuryStatus:
         location=PainLocation(loc),
         status=InjuryState(st),
         severity=sev,
-        contraindicated_exercises=list(contra or []),
-        safe_alternatives=list(alts or []),
+        contraindicated_exercises=[c for c in (contra or []) if c is not None],
+        safe_alternatives=[a for a in (alts or []) if a is not None],
     )
 
 
@@ -118,12 +118,14 @@ def contraindication_hits(names: Iterable[str]) -> list[tuple[str, str, list[str
     hits = []
     for location, status, contra, alts in rows:
         for entry in contra or []:
+            if entry is None:  # not producible by seed_injury; skip, don't crash the gate
+                continue
             keys = {lookup_key(entry)}
             canon = resolve_name(entry)
             if canon:
                 keys.add(lookup_key(canon))
             if keys & wanted:
-                hits.append((location, status, list(alts or [])))
+                hits.append((location, status, [a for a in (alts or []) if a is not None]))
                 break
     return hits
 

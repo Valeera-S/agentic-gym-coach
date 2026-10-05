@@ -30,7 +30,6 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from models import ExerciseModel, SessionInput  # noqa: E402
-from models.exercise_catalog import canonicalize  # noqa: E402
 from skills.session_logger import log_session  # noqa: E402
 
 _DATE_HEADER = re.compile(r"^###\s*(\d{2})/(\d{2})(?:\s*\(.*?\))?\s*$")
@@ -100,11 +99,13 @@ def _build_exercises(blocks: list[tuple[str, list[list[str]]]]) -> list[Exercise
         note_parts = [r[6].strip() for r in rows if r[6].strip()]
         notes = " / ".join(note_parts) or None
         pain = _pain_flag(notes)
-        _, mg, _ = canonicalize(name)  # muscle_group resolved at log_session time too
+        # muscle_group is left to log_session, which classifies the name and
+        # records how (catalog / keyword / unclassified). Passing the catalog's
+        # guess here would store it as caller-set.
         out.append(
             ExerciseModel(
                 name=name, sets=len(rows), reps=reps, rpe=rpe,
-                weight_kg=weight, notes=notes, pain_flag=pain, muscle_group=mg,
+                weight_kg=weight, notes=notes, pain_flag=pain,
             )
         )
     return out

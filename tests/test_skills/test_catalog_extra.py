@@ -35,19 +35,21 @@ def test_case_variant_keeps_its_secondary_overlap():
 
 def test_keyword_fallback_returns_raw_name_with_review():
     name, mg, review = canonicalize("Meadows Row")
-    assert (name, mg, review) == ("Meadows Row", MuscleGroup.mid_back, True)
+    # rows guess the ch03 horizontal-pull first-listed primary, as the catalog stores
+    assert (name, mg, review) == ("Meadows Row", MuscleGroup.lats, True)
 
 
-def test_unknown_exercise_defaults_to_core_and_review():
+def test_unknown_exercise_is_unclassified_not_a_real_muscle():
+    # the old terminal default poured unknown sets into core
     name, mg, review = canonicalize("Zercher Carry")
     assert review is True
-    assert mg == MuscleGroup.core
+    assert mg == MuscleGroup.unclassified
     assert name == "Zercher Carry"
 
 
-def test_empty_string_is_unknown_core():
+def test_empty_string_is_unclassified():
     name, mg, review = canonicalize("")
-    assert (name, mg, review) == ("", MuscleGroup.core, True)
+    assert (name, mg, review) == ("", MuscleGroup.unclassified, True)
 
 
 def test_unicode_name_is_flagged_not_rejected():

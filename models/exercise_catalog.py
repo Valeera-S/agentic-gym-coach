@@ -28,16 +28,18 @@ the weight was measured.
     machine_stack  selectorized machine or single cable stack reading
     bodyweight     no external load recorded
 
-Unknown names fall back to keyword matching and are flagged for review
-(`canonicalize(...)` needs_review) — ingestion never blocks on an unknown.
+Unknown names fall back to keyword matching (a guessed primary, flagged for
+review), and a name with no keyword is `unclassified` — still loggable, but
+credited to no muscle (see classify()). Ingestion never blocks on an unknown.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from .doctrine_ch03 import EXERCISE_PATTERN, chart_credit
-from .enums import LoadType, MuscleGroup
+from .enums import LoadType, MuscleGroup, MuscleSource
 
 PH, PS, TOT, MS, BW = (LoadType.per_hand, LoadType.per_side, LoadType.total,
                        LoadType.machine_stack, LoadType.bodyweight)
@@ -176,11 +178,12 @@ CATALOG: dict[str, Exercise] = {e.name: e for e in _ENTRIES}
 
 
 def lookup_key(name: str) -> str:
-    """Normalize a name for catalog lookup: the same `trim(lower(...))` the
-    injury table already applies to contraindications (skills/injuries.py).
-    Both sides must normalize identically or canonicalization and the ban
-    match stop composing (adversarial F1)."""
-    return name.strip().lower()
+    """Normalize a name for catalog lookup: lower case, outer whitespace
+    trimmed, inner runs of whitespace collapsed ("lat   pulldown"). The
+    safety gate normalizes stored ban entries with this same function
+    (skills/injuries.py); both sides must normalize identically or
+    canonicalization and the ban match stop composing (adversarial F1)."""
+    return " ".join(name.split()).lower()
 
 
 def _derive() -> tuple[dict[str, MuscleGroup], dict[str, list[MuscleGroup]]]:
@@ -210,13 +213,28 @@ for _e in _ENTRIES:
         _ALIAS_TO_CANONICAL[_k] = (_e.name, PRIMARY[_e.name])
 
 
+def _catalog_hit(key: str) -> tuple[str, MuscleGroup] | None:
+    """Catalog lookup by normalized key; a plain plural ("...s" / "...es" /
+    "...ies") of a catalog name or alias resolves to it too."""
+    hit = _ALIAS_TO_CANONICAL.get(key)
+    if hit is None and key.endswith("ies") and len(key) > 5:
+        hit = _ALIAS_TO_CANONICAL.get(key[:-3] + "y")
+    if hit is None:
+        for suffix in ("es", "s"):
+            if key.endswith(suffix) and len(key) > len(suffix) + 2:
+                hit = _ALIAS_TO_CANONICAL.get(key[: -len(suffix)])
+                if hit:
+                    break
+    return hit
+
+
 def resolve_name(name: str) -> str | None:
     """Canonical identity for a catalog name or alias (any case); None if unknown.
 
     Analytics resolve STORED names through this too, so a row stored under a
     name that has since become an alias still credits the right muscles.
     """
-    hit = _ALIAS_TO_CANONICAL.get(lookup_key(name))
+    hit = _catalog_hit(lookup_key(name))
     return hit[0] if hit else None
 
 
@@ -233,6 +251,8 @@ def credited_muscles(name: str, stored_primary: str | None) -> set[str]:
     out = {m.value for m in _FULL_CREDIT.get(canon, ())} if canon else set()
     if stored_primary:
         out.add(stored_primary)
+    # the sentinel is not a muscle: its sets stay logged but credit nothing
+    out.discard(MuscleGroup.unclassified.value)
     return out
 
 
@@ -366,55 +386,151 @@ for _e in _ENTRIES:
             raise ValueError(f"{_e.name!r} lists unknown variant {_v!r}")
 
 
-# ponytail: keyword fallback for unseen exercises. Extend the keyword lists
-# as new exercises appear. An exercise whose only keyword is ambiguous
-# (e.g. "Press" alone) maps to best-guess and flags needs_review=True.
+# --- unknown names: keyword fallback -----------------------------------------
+# HEURISTIC — none of this table is book doctrine. For a name the catalog does
+# not know, the first matching rule guesses its PRIMARY muscle (the ch03
+# chart's first-listed primary for that pattern, so a guess agrees with what
+# the catalog would store); the non-chart lines (stop words, band walks,
+# pull-aparts, ...) are reasoned guesses, and every hit is reported to the
+# user as a guess (needs_review). Guesses credit only that primary (no
+# overlap: the pattern itself is a guess).
+# Keywords match whole words, with an optional plural; hyphens count as word
+# breaks, so rules that a hyphenated prefix could trip ("iso-lateral") are
+# written as specific phrases or guarded, never as a bare word. Regex gaps are
+# bounded ({0,40}) so a pathological name cannot make matching slow.
+#
+# ORDER IS PRECEDENCE — specific before general. Notable pairs:
+#   reverse/rear/bent-over ... fly|lateral|raise  before  fly, lateral
+#   stop words (wrist curl, forearm, neck, row erg, sled, ...)  before  curl, row
+#   straight-arm / lat pushdown    before  pushdown
+#   pike / handstand push-up       before  push-up
+#   reverse nordic (quads)         before  nordic (hamstrings)
+#   tricep / dumbbell kickback     before  kickback
+#   calf                           before  leg press
+#   lunge / band walk / squat      before  bare "laterals"
+#   hinge pulls (rack/block pull, pull-through)  before  pull
+#   row                            before  chest / bench / incline  ("chest-supported row")
+#   leg / ham / hamstring curl     before  curl
+#   "walk"                         before  incline   ("incline walk")
+#   crunch / sit-up / plank        before  decline / incline / bench  ("decline crunch")
+#   lateral pulldown (lats)        before  bare "laterals"
+#   glute-ham raise (hamstrings)   before  glute
+# A rule may map to `unclassified`: the name is recognised as NOT strength work
+# for any muscle in the vocabulary, so it credits nothing.
+
+_GAP = r".{0,40}?"
+
+
+def _kw(*words: str) -> str:
+    """Whole-word alternatives, each with an optional plural."""
+    return r"\b(?:" + "|".join(re.escape(w) for w in words) + r")(?:e?s)?\b"
+
+
 _KEYWORD_RULES: list[tuple[str, MuscleGroup]] = [
-    ("incline", MuscleGroup.chest),
-    ("lateral", MuscleGroup.side_delt),
-    ("rear delt", MuscleGroup.rear_delt),
-    ("reverse fly", MuscleGroup.rear_delt),
-    ("face pull", MuscleGroup.rear_delt),  # before "pull", which would win otherwise
-    ("fly", MuscleGroup.chest),      # after "reverse fly" for the same reason
-    ("bench", MuscleGroup.chest),
-    ("row", MuscleGroup.mid_back),
-    ("pull", MuscleGroup.lats),
-    ("curl", MuscleGroup.biceps),
-    ("tricep", MuscleGroup.triceps),
-    ("skull", MuscleGroup.triceps),
-    ("dip", MuscleGroup.triceps),
-    ("squat", MuscleGroup.quads),
-    ("leg extension", MuscleGroup.quads),
-    ("leg press", MuscleGroup.quads),
-    ("split", MuscleGroup.quads),
-    ("deadlift", MuscleGroup.hamstrings),
-    ("leg curl", MuscleGroup.hamstrings),
-    ("hip thrust", MuscleGroup.glutes),
-    ("glute", MuscleGroup.glutes),
-    ("kickback", MuscleGroup.glutes),
-    ("calf", MuscleGroup.calves),
-    ("crunch", MuscleGroup.core),
-    ("leg raise", MuscleGroup.core),
-    ("shoulder press", MuscleGroup.side_delt),
-    ("overhead press", MuscleGroup.side_delt),
-    ("push-up", MuscleGroup.chest),
-    ("pushup", MuscleGroup.chest),
+    # rear delts — reverse/rear/bent-over + a fly/raise word ("reverse grip" is
+    # a grip, not a rear-delt movement)
+    (rf"\b(?:reverse(?![- ]grip)|rear|bent[- ]over)\b{_GAP}\b(?:fl(?:y|ys|yes|ies)"
+     r"|butterfl(?:y|ies)|crossovers?|laterals?|raises?)\b", M.rear_delt),
+    (_kw("rear delt", "reverse pec", "face pull", "facepull", "pull-apart", "pull apart"),
+     M.rear_delt),
+    # not strength work for any vocabulary muscle — before curl / row / lateral
+    (_kw("wrist curl", "forearm curl", "neck curl", "neck extension", "neck flexion",
+         "neck harness", "jefferson curl", "lateral box jump", "lateral shuffle",
+         "lateral bound", "box jump", "row erg", "rowing machine", "concept2", "erg", "sled",
+         "treadmill", "elliptical", "stairmaster", "bike", "cycling", "jog", "run",
+         "y raise", "y-raise", "shrug", "stretch"), M.unclassified),
+    # ch03 "Pullover / lat pushdown" -> lats (before the triceps "pushdown")
+    (r"\bstraight[- ]arm\b", M.lats),
+    (_kw("lat pushdown", "pullover", "pull-over", "lateral pulldown", "lateral pull-down",
+         "lateral pull down"), M.lats),
+    # calves (before "leg press": "leg press calf raise")
+    (_kw("calf", "calves"), M.calves),
+    # delts
+    (_kw("upright row"), M.side_delt),
+    (_kw("pike push-up", "pike pushup", "pike push up", "handstand push-up",
+         "handstand pushup", "handstand push up", "hspu"), M.front_delt),
+    (_kw("lateral raise", "lat raise", "lateral delt raise", "lateral fly", "side raise",
+         "side lateral"), M.side_delt),
+    (_kw("front raise"), M.front_delt),
+    # triceps (before kickback)
+    (_kw("tricep", "skull crusher", "skullcrusher", "skull", "pushdown", "pressdown",
+         "dip", "dumbbell kickback", "french press", "overhead extension",
+         "overhead cable extension"), M.triceps),
+    # reverse nordic is knee extension (quads) — before the hamstring nordic
+    (_kw("reverse nordic"), M.quads),
+    (_kw("leg curl", "ham curl", "hamstring curl", "nordic", "ghr", "glute ham raise",
+         "glute-ham raise"), M.hamstrings),
+    # quads, abs and glutes on the leg/hip patterns
+    (_kw("leg extension", "leg ext", "knee extension", "leg press"), M.quads),
+    (_kw("leg raise", "knee raise", "toes to bar", "ab wheel", "rollout", "russian twist",
+         "crunch", "sit-up", "sit up", "situp", "plank"), M.core),
+    (_kw("hip thrust", "hip thruster", "glute", "bridge", "kickback", "band walk",
+         "monster walk", "kettlebell swing", "kb swing", "donkey kick"), M.glutes),
+    (_kw("walk"), M.unclassified),  # after the band walks, before "incline" (incline walk)
+    (_kw("lunge", "step-up", "step up", "squat", "squatting", "split squat", "bulgarian"),
+     M.quads),
+    # a bare "lateral(s)" is the side-delt raise — but never "iso-lateral"
+    (r"(?<!iso-)(?<!iso )\blaterals?\b", M.side_delt),
+    # hinge — ch03 hip hinge, first-listed primary: glutes (before "pull")
+    (_kw("deadlift", "deadlifting", "rdl", "sldl", "good morning", "back extension",
+         "hyperextension", "reverse hyper", "rack pull", "block pull", "pull-through",
+         "pull through"),
+     M.glutes),
+    # horizontal pull — ch03 first-listed primary: lats (before chest/bench/incline)
+    (_kw("row", "seated rowing", "cable rowing"), M.lats),
+    # arms
+    (_kw("curl"), M.biceps),
+    # vertical pull
+    (_kw("pulldown", "pull-down", "pull-up", "pullup", "pull up", "chin-up", "chinup",
+         "chin up", "chin", "pull"), M.lats),
+    # vertical push — ch03: anterior delts primary
+    (_kw("shoulder press", "overhead press", "military press", "arnold press",
+         "push press", "behind the neck press", "behind-the-neck press",
+         "overhead dumbbell press"), M.front_delt),
+    # chest (horizontal push / fly)
+    (_kw("fly", "flye", "flies", "butterfly", "pec", "bench", "benching", "benchpress",
+         "chest", "incline", "decline", "floor press", "flat db press", "hex press",
+         "larsen press", "spoto press", "guillotine press", "pin press", "board press",
+         "flat dumbbell press", "push-up", "pushup", "push up"), M.chest),
 ]
+
+_KEYWORD_PATTERNS = [(re.compile(rx), mg) for rx, mg in _KEYWORD_RULES]
+
+
+@dataclass(frozen=True)
+class Classification:
+    """How a raw exercise name was resolved."""
+
+    name: str                  # catalog identity, or the trimmed raw name
+    muscle_group: MuscleGroup  # primary muscle (`unclassified` if none)
+    source: MuscleSource       # catalog | keyword | unclassified
+
+    @property
+    def needs_review(self) -> bool:
+        return self.source is not MuscleSource.catalog
+
+
+def classify(raw_name: str) -> Classification:
+    """Catalog identity (any alias, any case), else a keyword guess, else
+    `unclassified`. Never raises on an unknown name — ingestion never blocks."""
+    key = raw_name.strip()
+    hit = _catalog_hit(lookup_key(key))
+    if hit:
+        return Classification(hit[0], hit[1], MuscleSource.catalog)
+    low = lookup_key(key)
+    for pattern, mg in _KEYWORD_PATTERNS:
+        if pattern.search(low):
+            if mg is M.unclassified:  # recognised as no vocabulary muscle's work
+                break
+            return Classification(key, mg, MuscleSource.keyword)
+    return Classification(key, M.unclassified, MuscleSource.unclassified)
 
 
 def canonicalize(raw_name: str) -> tuple[str, MuscleGroup, bool]:
-    """Return (canonical_name, muscle_group, needs_review).
+    """Return (canonical_name, muscle_group, needs_review) — see classify().
 
-    Alias match (case-insensitive) → needs_review=False. Keyword fallback →
-    True so the user can confirm the guessed mapping via /status review.
+    needs_review is True for a keyword guess or an unclassified name, so the
+    coach confirms the mapping with the user.
     """
-    key = raw_name.strip()
-    low = key.lower()
-    if low in _ALIAS_TO_CANONICAL:
-        can, mg = _ALIAS_TO_CANONICAL[low]
-        return can, mg, False
-    for kw, mg in _KEYWORD_RULES:
-        if kw in low:
-            return key, mg, True
-    # ponytail: unmapped → still loggable, flagged for review
-    return key, MuscleGroup.core, True
+    c = classify(raw_name)
+    return c.name, c.muscle_group, c.needs_review

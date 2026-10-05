@@ -91,6 +91,15 @@ class SessionKind(str, Enum):
     habit = "habit"
 
 
+class MuscleSource(str, Enum):
+    """How a logged exercise's muscle_group was decided (exercises.muscle_source)."""
+
+    catalog = "catalog"            # the name is a catalog identity / alias
+    keyword = "keyword"            # unknown name; primary guessed from a keyword
+    caller = "caller"              # the caller set muscle_group explicitly
+    unclassified = "unclassified"  # unknown name, no keyword: credited to no muscle
+
+
 class PhaseType(str, Enum):
     maintenance = "maintenance"            # off-season / no specific push
     reconditioning = "reconditioning"      # return from layoff or into base work

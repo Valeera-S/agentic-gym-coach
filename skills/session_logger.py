@@ -8,7 +8,10 @@ Flow:
   3. Canonicalize each exercise: fill muscle_group from the catalog and
      store the canonical identity name, plus `raw_name` — what the caller
      actually typed.
-  4. Raise anomaly flags: pain_flag, form_quality<3, unmapped exercise.
+  4. Record muscle_source (catalog | keyword | caller | unclassified) and
+     raise anomaly flags: pain_flag, form_quality<3, and needs_review for a
+     name the catalog does not know — worded by source, so a caller-set
+     muscle is never reported as a guess.
   5. INSERT into sessions, RETURNING the generated id.
 
 Contract: <50ms. Never fabricates fields the user didn't provide.
@@ -24,30 +27,43 @@ from models import (
     ExerciseModel,
     LogConfirmation,
     SessionInput,
-    canonicalize,
+    MuscleGroup,
+    MuscleSource,
+    classify,
 )
 
-from models.exercise_catalog import default_load_type
+from models.exercise_catalog import default_load_type, resolve_name
 
 from .init import get_duckdb
 from .phase import phase_for_logging
 
 
-def _canonicalize_exercises(data: SessionInput) -> list[AnomalyFlag]:
-    flags: list[AnomalyFlag] = []
+def _canonicalize_exercises(data: SessionInput) -> list[MuscleSource]:
+    """Canonicalize names, fill muscle_group, return each exercise's
+    muscle_source. Mutates `data.exercises` in place."""
+    sources: list[MuscleSource] = []
     for ex in data.exercises:
-        can_name, mg, needs_review = canonicalize(ex.name)
+        c = classify(ex.name)
+        ex.name = c.name
         if ex.muscle_group is None:
-            ex.muscle_group = mg
+            ex.muscle_group = c.muscle_group
+            sources.append(c.source)
+        else:
+            # caller-supplied muscle wins over the catalog / a guess
+            sources.append(MuscleSource.caller)
         if ex.load_type is None:
             # the identity's default; a caller-supplied load_type always wins
-            ex.load_type = default_load_type(can_name)
-        ex.name = can_name
-        if needs_review:
-            flags.append(AnomalyFlag(
-                code=AnomalyCode.needs_review,
-                detail=f"unmapped exercise '{ex.name}' guessed as {ex.muscle_group.value}",
-            ))
+            ex.load_type = default_load_type(c.name)
+    return sources
+
+
+def _anomaly_flags(data: SessionInput, sources: list[MuscleSource],
+                   in_catalog: list[bool]) -> list[AnomalyFlag]:
+    flags: list[AnomalyFlag] = []
+    for ex, source, known in zip(data.exercises, sources, in_catalog, strict=True):
+        if not known:
+            flags.append(AnomalyFlag(code=AnomalyCode.needs_review,
+                                     detail=review_detail(ex.name, ex.muscle_group, source)))
         if ex.pain_flag:
             flags.append(AnomalyFlag(
                 code=AnomalyCode.pain_flag, detail=f"{ex.name}: pain during exercise"))
@@ -59,11 +75,28 @@ def _canonicalize_exercises(data: SessionInput) -> list[AnomalyFlag]:
     return flags
 
 
-def _to_struct_list(exercises: list[ExerciseModel], raw_names: list[str]) -> list[dict]:
+def review_detail(name: str, muscle: MuscleGroup | None, source: MuscleSource) -> str:
+    """The needs_review message for a name the catalog does not know, stating
+    truthfully where its muscle came from."""
+    mg = muscle.value if muscle else "none"
+    if source is MuscleSource.caller:
+        if muscle is MuscleGroup.unclassified:
+            return (f"exercise '{name}' is not in the catalog; caller set it unclassified: "
+                    "logged, but its sets credit no muscle until it is mapped")
+        return f"exercise '{name}' is not in the catalog; muscle {mg} set by caller"
+    if source is MuscleSource.keyword:
+        return f"unmapped exercise '{name}' guessed by keyword as {mg}"
+    return (f"unmapped exercise '{name}' is unclassified: logged, but its sets "
+            "credit no muscle until it is mapped")
+
+
+def _to_struct_list(exercises: list[ExerciseModel], raw_names: list[str],
+                    sources: list[MuscleSource]) -> list[dict]:
     return [
         {
             "name": ex.name,
             "raw_name": raw,
+            "muscle_source": source.value,
             "muscle_group": ex.muscle_group.value if ex.muscle_group else None,
             "sets": ex.sets,
             "reps": ex.reps,
@@ -79,7 +112,7 @@ def _to_struct_list(exercises: list[ExerciseModel], raw_names: list[str]) -> lis
             "entered_weight": ex.weight if ex.unit else None,
             "entered_unit": ex.unit.value if ex.unit else None,
         }
-        for ex, raw in zip(exercises, raw_names, strict=True)
+        for ex, raw, source in zip(exercises, raw_names, sources, strict=True)
     ]
 
 
@@ -88,9 +121,11 @@ def log_session(data: SessionInput) -> LogConfirmation:
     # What the caller typed, kept beside the canonical identity (read-back,
     # and the record of what a canonicalization decision was made from).
     raw_names = [ex.name for ex in data.exercises]
-    flags = _canonicalize_exercises(data)
+    sources = _canonicalize_exercises(data)
+    in_catalog = [resolve_name(ex.name) is not None for ex in data.exercises]
+    flags = _anomaly_flags(data, sources, in_catalog)
 
-    structs = _to_struct_list(data.exercises, raw_names)
+    structs = _to_struct_list(data.exercises, raw_names, sources)
     row = get_duckdb().execute(
         """
         INSERT INTO sessions (date, phase, pre_recovery_score, exercises, post_feedback, kind)
