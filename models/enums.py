@@ -154,3 +154,5 @@ class DecisionEventType(str, Enum):
     plan_modification = "plan_modification"
     anomaly = "anomaly"
     goal_change = "goal_change"
+    session_amend = "session_amend"    # payload: the complete pre-change row
+    session_delete = "session_delete"  # payload: the complete deleted row

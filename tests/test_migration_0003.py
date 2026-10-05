@@ -20,6 +20,8 @@ from models import ExerciseModel, MuscleGroup, SessionInput, UserProfile
 from skills.init import get_duckdb
 
 _REPO_INI = "alembic.ini"
+# Pinned (not "head"): these tests are about 0003 itself, whatever comes after it.
+_REV = "0003_vocab_exercise_fields"
 
 # Shaped like the real 2026-09-19 push day: an upper_chest primary, per-hand
 # lb-converted weights, a bodyweight exercise with null weights + null reps.
@@ -79,7 +81,7 @@ def legacy_db(tmp_path):
         "SELECT id, date, phase, pre_recovery_score, post_feedback, created_at "
         "FROM sessions ORDER BY date").fetchall()
     con.close()
-    command.upgrade(_cfg(db), "head")
+    command.upgrade(_cfg(db), _REV)
     return db, before
 
 
@@ -188,7 +190,7 @@ def test_downgrade_round_trips_when_representable(legacy_db):
     payload = json.loads(con.execute("SELECT payload FROM user_profiles").fetchone()[0])
     assert payload["priority_muscles"] == ["upper_chest", "side_delt"]
     con.close()
-    command.upgrade(_cfg(db), "head")
+    command.upgrade(_cfg(db), _REV)
     con = duckdb.connect(str(db))
     first = con.execute("SELECT exercises FROM sessions ORDER BY date").fetchone()[0]
     con.close()
@@ -330,7 +332,7 @@ def test_offline_scripts_render_and_are_wrapped_in_a_transaction(tmp_path):
 ])
 def test_offline_downgrade_guards_abort_the_whole_step_even_if_the_runner_continues(tmp_path, seed):
     db = tmp_path / "offline.duckdb"
-    command.upgrade(_cfg(db), "head")
+    command.upgrade(_cfg(db), _REV)
     con = duckdb.connect(str(db))
     con.execute(f"INSERT INTO sessions (date, phase, exercises, kind) "
                 f"VALUES (DATE '2026-10-01', 'maintenance', {seed})")
@@ -344,7 +346,7 @@ def test_offline_downgrade_guards_abort_the_whole_step_even_if_the_runner_contin
 
 def test_offline_downgrade_runs_cleanly_on_representable_data(tmp_path):
     db = tmp_path / "offline_ok.duckdb"
-    command.upgrade(_cfg(db), "head")
+    command.upgrade(_cfg(db), _REV)
     con = duckdb.connect(str(db))
     con.execute("INSERT INTO sessions (date, phase, exercises) VALUES "
                 "(DATE '2026-10-01', 'maintenance', [{'name': 'x', 'muscle_group': 'chest', 'sets': 1}])")
@@ -388,7 +390,7 @@ def test_offline_and_online_upgrades_agree_when_offline_is_allowed(tmp_path):
                     [json.dumps({"priority_muscles": ["side_delt"], "notes": "chest day"})])
         con.close()
         dbs[mode] = db
-    command.upgrade(_cfg(dbs["online"]), "head")
+    command.upgrade(_cfg(dbs["online"]), _REV)
     assert _run_script(dbs["offline"], _render(
         tmp_path, "upgrade", "0002_profile_memory:0003_vocab_exercise_fields")) == []
     assert _dump(dbs["offline"]) == _dump(dbs["online"])
@@ -407,7 +409,7 @@ def test_odd_profile_shapes_never_crash_the_upgrade(tmp_path, payload):
     con = duckdb.connect(str(db))
     con.execute("INSERT INTO user_profiles (payload) VALUES (?)", [json.dumps(payload)])
     con.close()
-    command.upgrade(_cfg(db), "head")
+    command.upgrade(_cfg(db), _REV)
     con = duckdb.connect(str(db))
     stored = json.loads(con.execute("SELECT payload FROM user_profiles").fetchone()[0])
     con.close()

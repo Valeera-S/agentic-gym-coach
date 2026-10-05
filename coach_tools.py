@@ -122,6 +122,18 @@ def cmd_session_detail(args: dict):
     return {"sessions": [d.model_dump(mode="json") for d in details]}
 
 
+def cmd_session_amend(args: dict):
+    from models import SessionAmendInput
+    from skills.sessions import amend_session
+    data = SessionAmendInput.model_validate(args)  # rejected before any write
+    return amend_session(data).model_dump(mode="json")
+
+
+def cmd_session_delete(args: dict):
+    from skills.sessions import delete_session
+    return delete_session(args["session_id"]).model_dump(mode="json")
+
+
 def cmd_injuries_list(args: dict):
     from skills.injuries import list_injuries
     return [i.model_dump(mode="json") for i in list_injuries()]
@@ -207,6 +219,8 @@ _HANDLERS = {
     "intake_status": cmd_intake_status,
     "sessions": cmd_sessions,
     "session_detail": cmd_session_detail,
+    "session_amend": cmd_session_amend,
+    "session_delete": cmd_session_delete,
     "injuries_list": cmd_injuries_list,
     "injuries_seed": cmd_injuries_seed,
     "profile_get": cmd_profile_get,

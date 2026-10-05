@@ -1,4 +1,7 @@
-"""sessions — read back logged sessions in full (the single owner of that read).
+"""sessions — read back, amend and delete logged sessions.
+
+The single owner of whole-session reads and of corrections (log_session in
+skills/session_logger.py is the only other writer).
 
 `coach_sessions` lists sessions leanly (Tier-1 friendly); this skill returns
 ONE session — or every session on one date — exactly as logged: each exercise
@@ -21,14 +24,25 @@ from __future__ import annotations
 
 import struct
 from datetime import date
+import json
 from functools import lru_cache
 from uuid import UUID
 
-from models import ExerciseDetail, MuscleGroup, MuscleSource, SessionDetail
+from models import (
+    DecisionEventType,
+    ExerciseDetail,
+    MuscleGroup,
+    MuscleSource,
+    PhaseType,
+    SessionAmendInput,
+    SessionChange,
+    SessionDetail,
+    SessionInput,
+)
 from models.exercise_catalog import resolve_name
 
 from .init import get_duckdb
-from .session_logger import review_detail
+from .session_logger import prepare_session, review_detail
 
 _COLS = "id, date, phase, kind, pre_recovery_score, post_feedback, created_at, exercises"
 
@@ -182,3 +196,149 @@ def get_session_detail(session_id: str | UUID | None = None,
             raise ValueError(f"no session logged on {on_date.isoformat()}")
     return [_row_to_detail(r) for r in rows]
 
+
+# --- corrections: amend / delete -----------------------------------------------------
+# Both write the COMPLETE pre-change row to decision_log.payload in the same
+# transaction as the change, raw — exactly the stored values (float32 reps /
+# rpe included), so the row can be put back from the audit entry alone
+# (restore_snapshot()). An unknown id is invalid_input; nothing is written.
+
+def _uuid(session_id) -> UUID:
+    if isinstance(session_id, UUID):
+        return session_id
+    if not isinstance(session_id, str):
+        raise ValueError("session_id must be a string UUID")
+    return UUID(session_id)
+
+
+def _snapshot(sid: UUID) -> dict | None:
+    """The stored row, JSON-ready and complete (every column)."""
+    row = get_duckdb().execute(f"SELECT {_COLS} FROM sessions WHERE id = ?", [sid]).fetchone()
+    if row is None:
+        return None
+    sid_, d, phase, kind, score, feedback, created, exercises = row
+    return {
+        "id": str(sid_), "date": d.isoformat(), "phase": phase, "kind": kind,
+        "pre_recovery_score": score, "post_feedback": feedback,
+        "created_at": created.isoformat() if created is not None else None,
+        "exercises": exercises,
+    }
+
+
+_PAST = {DecisionEventType.session_amend: "amended", DecisionEventType.session_delete: "deleted"}
+
+
+def _audit(event: DecisionEventType, sid: UUID, before: dict, note: str,
+           after: dict | None = None) -> UUID:
+    payload = {"session_id": str(sid), "before": before}
+    if after is not None:
+        payload["after"] = after
+    return get_duckdb().execute(
+        """INSERT INTO decision_log (event_type, trigger_signal, reasoning_chain, payload)
+           VALUES (?, ?, ?, ?) RETURNING id""",
+        [event.value, f"session {sid} {_PAST[event]}", note,
+         json.dumps(payload, ensure_ascii=False)],
+    ).fetchone()[0]
+
+
+def _in_transaction(work):
+    d = get_duckdb()
+    d.execute("BEGIN TRANSACTION")
+    try:
+        result = work()
+    except BaseException:
+        d.execute("ROLLBACK")
+        raise
+    d.execute("COMMIT")
+    return result
+
+
+def _amended(data: SessionAmendInput, name: str, before: dict):
+    """New value: cleared if listed in `clear`, the given value, else kept."""
+    if name in data.clear:
+        return None
+    value = getattr(data, name)
+    return value if value is not None else before[name]
+
+
+def amend_session(data: SessionAmendInput) -> SessionChange:
+    """Replace a session's date and exercises, keeping its id (and created_at).
+
+    The new content goes through prepare_session(), exactly like a fresh log.
+    Fields left out or null (phase, kind, pre_recovery_score, post_feedback)
+    keep their stored values; `clear` removes post_feedback /
+    pre_recovery_score explicitly.
+    """
+    sid = data.session_id
+    before = _snapshot(sid)
+    if before is None:
+        raise ValueError(f"no session with id {sid}")
+    fresh = SessionInput(
+        date=data.date, exercises=data.exercises,
+        phase=data.phase or (PhaseType(before["phase"]) if before["phase"] else None),
+        kind=data.kind or before["kind"],
+        pre_recovery_score=_amended(data, "pre_recovery_score", before),
+        post_feedback=_amended(data, "post_feedback", before),
+    )
+    phase, structs, flags = prepare_session(fresh)
+
+    def work():
+        get_duckdb().execute(
+            """UPDATE sessions SET date = ?, phase = ?, kind = ?, pre_recovery_score = ?,
+                                   post_feedback = ?, exercises = ?
+               WHERE id = ?""",
+            [fresh.date, phase.value, fresh.kind.value, fresh.pre_recovery_score,
+             fresh.post_feedback, structs, sid])
+        return _audit(DecisionEventType.session_amend, sid, before,
+                      f"amended: {len(before['exercises'] or [])} -> {len(structs)} exercise(s)",
+                      after=_snapshot(sid))
+
+    audit_id = _in_transaction(work)
+    return SessionChange(action="amended", session_id=sid, audit_id=audit_id,
+                         anomaly_flags=flags, phase=phase.value, kind=fresh.kind.value,
+                         pre_recovery_score=fresh.pre_recovery_score,
+                         post_feedback=fresh.post_feedback,
+                         message="session amended; previous version audited")
+
+
+def delete_session(session_id) -> SessionChange:
+    """Hard-delete one session; its complete row is audited first."""
+    sid = _uuid(session_id)
+    before = _snapshot(sid)
+    if before is None:
+        raise ValueError(f"no session with id {sid}")
+
+    def work():
+        audit_id = _audit(DecisionEventType.session_delete, sid, before,
+                          f"deleted: {before['date']}, {len(before['exercises'] or [])} exercise(s)")
+        get_duckdb().execute("DELETE FROM sessions WHERE id = ?", [sid])
+        return audit_id
+
+    audit_id = _in_transaction(work)
+    return SessionChange(action="deleted", session_id=sid, audit_id=audit_id,
+                         message="session deleted; its full row is in the audit trail")
+
+
+def restore_snapshot(audit_id) -> UUID:
+    """Put a session back exactly as an audit entry recorded it before the
+    change (a deleted session is re-inserted; an amended one is overwritten).
+    For recovery by the coding agent — deliberately not a coach tool."""
+    row = get_duckdb().execute(
+        "SELECT event_type, payload FROM decision_log WHERE id = ?", [_uuid(audit_id)]).fetchone()
+    if row is None or row[1] is None:
+        raise ValueError(f"no restorable audit entry {audit_id}")
+    before = json.loads(row[1])["before"]
+    sid = UUID(before["id"])
+
+    def work():
+        d = get_duckdb()
+        d.execute("DELETE FROM sessions WHERE id = ?", [sid])
+        d.execute(
+            """INSERT INTO sessions (id, date, phase, kind, pre_recovery_score, post_feedback,
+                                     created_at, exercises)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            [sid, before["date"], before["phase"], before["kind"], before["pre_recovery_score"],
+             before["post_feedback"], before["created_at"], before["exercises"]])
+        return sid
+
+    return _in_transaction(work)

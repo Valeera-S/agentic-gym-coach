@@ -29,6 +29,7 @@ from models import (
     SessionInput,
     MuscleGroup,
     MuscleSource,
+    PhaseType,
     classify,
 )
 
@@ -116,7 +117,10 @@ def _to_struct_list(exercises: list[ExerciseModel], raw_names: list[str],
     ]
 
 
-def log_session(data: SessionInput) -> LogConfirmation:
+def prepare_session(data: SessionInput) -> tuple[PhaseType, list[dict], list[AnomalyFlag]]:
+    """Everything a write needs, done the one way: (phase, exercise structs,
+    anomaly flags). Shared by log_session and the amend tool, so an amended
+    session is validated and canonicalized exactly like a fresh log."""
     phase = phase_for_logging(data.phase)
     # What the caller typed, kept beside the canonical identity (read-back,
     # and the record of what a canonicalization decision was made from).
@@ -124,8 +128,11 @@ def log_session(data: SessionInput) -> LogConfirmation:
     sources = _canonicalize_exercises(data)
     in_catalog = [resolve_name(ex.name) is not None for ex in data.exercises]
     flags = _anomaly_flags(data, sources, in_catalog)
+    return phase, _to_struct_list(data.exercises, raw_names, sources), flags
 
-    structs = _to_struct_list(data.exercises, raw_names, sources)
+
+def log_session(data: SessionInput) -> LogConfirmation:
+    phase, structs, flags = prepare_session(data)
     row = get_duckdb().execute(
         """
         INSERT INTO sessions (date, phase, pre_recovery_score, exercises, post_feedback, kind)

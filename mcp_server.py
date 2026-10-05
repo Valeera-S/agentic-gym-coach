@@ -147,6 +147,35 @@ def coach_session_detail(session_id: str | None = None, date: str | None = None)
 
 
 @mcp.tool()
+def coach_session_amend(session_id: str, date: str, exercises: list[dict],
+                        phase: str | None = None, kind: str | None = None,
+                        post_feedback: str | None = None,
+                        pre_recovery_score: int | None = None,
+                        clear: list[str] | None = None) -> dict:
+    """Replace a logged session's date and exercises (same id). ONLY after showing the user the
+    current entry (coach_session_detail) and the correction, and getting their explicit yes.
+
+    date + exercises replace the stored ones and are validated/canonicalized exactly like a fresh log
+    (malformed input is rejected before any write). Every other field omitted OR null KEEPS its stored
+    value (phase, kind, post_feedback, pre_recovery_score) — pass one only to change it. To REMOVE a
+    stored post_feedback / pre_recovery_score, name it in `clear` (e.g. clear=["pre_recovery_score"]).
+    Returns the session-level values now stored.
+    The complete previous version is written to the audit trail. Unknown id -> invalid_input.
+    """
+    return _run("session_amend", {"session_id": session_id, "date": date, "exercises": exercises,
+                                  "phase": phase, "kind": kind, "post_feedback": post_feedback,
+                                  "pre_recovery_score": pre_recovery_score, "clear": clear or []})
+
+
+@mcp.tool()
+def coach_session_delete(session_id: str) -> dict:
+    """Permanently delete one logged session. ONLY after echoing the session (coach_session_detail)
+    to the user and getting their explicit confirmation. Its complete row is written to the audit
+    trail first. Unknown id -> invalid_input."""
+    return _run("session_delete", {"session_id": session_id})
+
+
+@mcp.tool()
 def coach_injuries_list() -> dict:
     """Read the injury_status table (location, status, severity, contraindications, alternatives)."""
     return _run("injuries_list", {})

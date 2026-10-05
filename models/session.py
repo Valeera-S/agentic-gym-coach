@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 from datetime import date, datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -181,6 +182,51 @@ class AnomalyFlag(BaseModel):
 
     code: AnomalyCode
     detail: str
+
+
+class SessionAmendInput(BaseModel):
+    """What coach_session_amend takes: a session's new content.
+
+    `date` and `exercises` replace the stored ones wholesale and are
+    re-validated and re-canonicalized exactly like a fresh log. Every other
+    field is optional and, when omitted OR null, KEEPS its stored value —
+    correcting a session's exercises must never silently clear the user's
+    feedback or recovery score, or turn a habit into training. Removing a
+    stored post_feedback / pre_recovery_score is an explicit act: name it in
+    `clear` (it may not also be given a value).
+    """
+
+    session_id: UUID
+    date: date
+    exercises: list[ExerciseModel]
+    phase: PhaseType | None = None
+    kind: SessionKind | None = None
+    pre_recovery_score: int | None = Field(default=None, ge=0, le=100)
+    post_feedback: str | None = None
+    clear: list[Literal["post_feedback", "pre_recovery_score"]] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _clear_or_set_not_both(self) -> "SessionAmendInput":
+        for name in self.clear:
+            if getattr(self, name) is not None:
+                raise ValueError(f"{name} is both given a value and listed in `clear`")
+        return self
+
+
+class SessionChange(BaseModel):
+    """Return of skills.sessions.amend_session() / delete_session()."""
+
+    action: Literal["amended", "deleted"]
+    session_id: UUID
+    audit_id: UUID                   # decision_log row holding the pre-change snapshot
+    anomaly_flags: list[AnomalyFlag] = Field(default_factory=list)  # amend: as a fresh log
+    # amend: the session-level values now stored (kept, changed or cleared),
+    # so the caller can tell the user exactly what the session looks like
+    phase: str | None = None
+    kind: str | None = None
+    pre_recovery_score: int | None = None
+    post_feedback: str | None = None
+    message: str = ""
 
 
 class LogConfirmation(BaseModel):
