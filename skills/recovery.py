@@ -10,6 +10,10 @@ The composite is a transparent heuristic — fatigue = recent sets, pain is a
 big negative, consecutive days add fatigue, rest days give a small bonus.
 Re-tune against real outcomes once enough history exists.
 
+Habit sessions (kind = 'habit', e.g. daily bodyweight squats) are not
+training: they are excluded from every input here, so a daily habit never
+makes the score think the user trained that day.
+
 Pre-session semantics: every component reads days strictly BEFORE the query
 date — a session already logged on that date is excluded (counting it would
 make the score circular). The output says so (`excludes_query_date: true`).
@@ -26,10 +30,15 @@ from models import RecoveryScore
 from .init import get_duckdb
 
 
+# Recovery reads training sessions only (habits are not training).
+_TRAINING = "kind = 'training'"
+
+
 def _days_since_last_session(before: date) -> int | None:
-    """Days from the most recent session strictly before `before`, or None."""
+    """Days from the most recent training session (habits excluded) strictly
+    before `before`, or None."""
     row = get_duckdb().execute(
-        "SELECT MAX(date) FROM sessions WHERE date < ?", [before]
+        f"SELECT MAX(date) FROM sessions WHERE date < ? AND {_TRAINING}", [before]
     ).fetchone()
     last = row[0]
     return (before - last).days if last is not None else None
@@ -37,10 +46,10 @@ def _days_since_last_session(before: date) -> int | None:
 
 def _sets_in_window(start: date, end: date) -> int:
     row = get_duckdb().execute(
-        """
+        f"""
         SELECT coalesce(sum(sets), 0) FROM (
             SELECT UNNEST(s.exercises).sets AS sets
-            FROM sessions s WHERE s.date BETWEEN ? AND ?
+            FROM sessions s WHERE s.date BETWEEN ? AND ? AND {_TRAINING}
         )
         """,
         [start, end],
@@ -50,10 +59,10 @@ def _sets_in_window(start: date, end: date) -> int:
 
 def _pain_in_window(start: date, end: date) -> int:
     row = get_duckdb().execute(
-        """
+        f"""
         SELECT count(*) FROM (
             SELECT UNNEST(s.exercises).pain_flag AS pf
-            FROM sessions s WHERE s.date BETWEEN ? AND ?
+            FROM sessions s WHERE s.date BETWEEN ? AND ? AND {_TRAINING}
         ) WHERE pf
         """,
         [start, end],
@@ -63,7 +72,7 @@ def _pain_in_window(start: date, end: date) -> int:
 
 def _trained_on(d: date) -> bool:
     return get_duckdb().execute(
-        "SELECT count(*) FROM sessions WHERE date = ?", [d]
+        f"SELECT count(*) FROM sessions WHERE date = ? AND {_TRAINING}", [d]
     ).fetchone()[0] > 0
 
 

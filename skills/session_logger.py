@@ -3,7 +3,7 @@
 Flow:
   1. Pydantic already validated `data` on construction (caller's job).
   2. Resolve `phase` if the user didn't set it — skills.phase.phase_for_logging
-     (current snapshot → modal session phase → maintenance default) so the
+     (current snapshot → modal training-session phase → maintenance default) so the
      user never has to tag a phase.
   3. Canonicalize each exercise: fill muscle_group from the catalog and
      store the canonical name (raw text survives in log.md).
@@ -83,11 +83,12 @@ def log_session(data: SessionInput) -> LogConfirmation:
     structs = _to_struct_list(data.exercises)
     row = get_duckdb().execute(
         """
-        INSERT INTO sessions (date, phase, pre_recovery_score, exercises, post_feedback)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO sessions (date, phase, pre_recovery_score, exercises, post_feedback, kind)
+        VALUES (?, ?, ?, ?, ?, ?)
         RETURNING id, date
         """,
-        [data.date, phase.value, data.pre_recovery_score, structs, data.post_feedback],
+        [data.date, phase.value, data.pre_recovery_score, structs, data.post_feedback,
+         data.kind.value],
     ).fetchone()
 
     session_id, session_date = row[0], row[1]

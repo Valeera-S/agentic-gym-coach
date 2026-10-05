@@ -46,7 +46,7 @@ class RecoveryScore(BaseModel):
 
 
 class SessionGap(BaseModel):
-    """Weeks since the last logged session + staleness verdict.
+    """Weeks since the last logged training session (habit sessions excluded) + staleness verdict.
 
     Return of snapshot.session_gap() — computed, not persisted. Threshold:
     skills.snapshot.REASSESSMENT_GAP_WEEKS, a labeled heuristic (the vendored

@@ -45,7 +45,7 @@ Never an intake question; stored only after the user confirms.
 _Avoid_: computed field, inference
 
 **Staleness signal (session_gap)**:
-Weeks since the last logged session, computed at snapshot/session start.
+Weeks since the last logged training session (habit sessions excluded), computed at snapshot/session start.
 Crossing the threshold (`REASSESSMENT_GAP_WEEKS`, a labeled heuristic — the
 books do not cover detraining timelines) makes confirming collected values
 mandatory before programming.

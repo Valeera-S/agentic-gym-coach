@@ -11,7 +11,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .enums import AnomalyCode, LoadType, MuscleGroup, PhaseType, WeightUnit
+from .enums import AnomalyCode, LoadType, MuscleGroup, PhaseType, SessionKind, WeightUnit
 
 # The international pound, exact by definition (1959 agreement).
 LB_TO_KG = 0.45359237
@@ -165,6 +165,7 @@ class SessionInput(BaseModel):
 
     `phase` is optional — if omitted the current phase from phase_snapshots
     is used. This keeps user logging frictionless (they never set phase).
+    `kind` defaults to a training session; see SessionKind for `habit`.
     """
 
     date: date
@@ -172,6 +173,7 @@ class SessionInput(BaseModel):
     pre_recovery_score: int | None = Field(default=None, ge=0, le=100)
     exercises: list[ExerciseModel]
     post_feedback: str | None = None
+    kind: SessionKind = SessionKind.training
 
 
 class AnomalyFlag(BaseModel):

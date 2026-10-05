@@ -26,6 +26,7 @@ def test_mcp_wrapper_defaults_come_from_coach_tools():
         ("coach_sessions", "limit", coach_tools.DEFAULT_SESSIONS_LIMIT),
         ("coach_memory_search", "limit", coach_tools.DEFAULT_SEARCH_LIMIT),
         ("coach_memory_save", "kind", coach_tools.DEFAULT_MEMORY_KIND),
+        ("coach_log_session", "kind", coach_tools.DEFAULT_SESSION_KIND),
     ]
     for tool, param, expected in cases:
         default = inspect.signature(getattr(mcp_server, tool)).parameters[param].default

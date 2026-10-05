@@ -30,6 +30,7 @@ DEFAULT_TREND_WINDOW_DAYS = 28
 DEFAULT_SESSIONS_LIMIT = 10
 DEFAULT_SEARCH_LIMIT = 20
 DEFAULT_MEMORY_KIND = "observation"
+DEFAULT_SESSION_KIND = "training"
 
 # Caller mistakes (bad value, missing key, wrong type) — the caller can fix
 # these by re-issuing the call. Anything else is db/internal: halt and report.
@@ -110,11 +111,11 @@ def cmd_sessions(args: dict):
     from skills.init import get_duckdb
     limit = _int_arg(args, "limit", DEFAULT_SESSIONS_LIMIT, minimum=0)
     rows = get_duckdb().execute(
-        "SELECT id, date, phase, pre_recovery_score, post_feedback "
+        "SELECT id, date, phase, pre_recovery_score, post_feedback, kind "
         "FROM sessions ORDER BY date DESC, created_at DESC LIMIT ?",
         [limit],
     ).fetchall()
-    cols = ["id", "date", "phase", "pre_recovery_score", "post_feedback"]
+    cols = ["id", "date", "phase", "pre_recovery_score", "post_feedback", "kind"]
     return [dict(zip(cols, r)) for r in rows]
 
 

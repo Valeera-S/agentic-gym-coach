@@ -4,7 +4,7 @@ One definition, previously copy-pasted in three places with diverging
 fallbacks (orchestrator / snapshot / session_logger):
 
     current_phase(): latest phase_snapshots row → modal phase across logged
-    sessions → None (no data at all).
+    TRAINING sessions (habit sessions excluded) → None (no data at all).
 
     phase_for_logging(): the phase to TAG a new session with — explicit user
     input wins, then current_phase(), then `maintenance` (the goal-agnostic
@@ -20,14 +20,18 @@ from .init import get_duckdb
 
 
 def current_phase() -> PhaseType | None:
-    """Latest snapshot's phase, else the modal session phase, else None."""
+    """Latest snapshot's phase, else the modal phase across training sessions
+    (habits excluded), else None."""
     row = get_duckdb().execute(
         "SELECT phase FROM phase_snapshots ORDER BY snapshot_date DESC LIMIT 1"
     ).fetchone()
     if row and row[0]:
         return PhaseType(row[0])
     row = get_duckdb().execute(
-        "SELECT phase FROM sessions GROUP BY phase ORDER BY count(*) DESC LIMIT 1"
+        # training sessions only: one habit entry a day would otherwise
+        # outvote the program's actual phase
+        "SELECT phase FROM sessions WHERE kind = 'training' "
+        "GROUP BY phase ORDER BY count(*) DESC LIMIT 1"
     ).fetchone()
     return PhaseType(row[0]) if row and row[0] else None
 

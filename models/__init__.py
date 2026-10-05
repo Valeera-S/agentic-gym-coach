@@ -8,6 +8,7 @@ from .enums import (
     MuscleGroup,
     PainLocation,
     PhaseType,
+    SessionKind,
     TrendDirection,
     WeightUnit,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "MuscleGroup",
     "PainLocation",
     "PhaseType",
+    "SessionKind",
     "TrendDirection",
     "EquipmentAccess",
     "ActivityLevel",

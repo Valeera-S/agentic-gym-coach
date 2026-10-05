@@ -7,9 +7,10 @@ Training ch04). Volume is effective hard sets, overlap-inclusive, via
 trend_analysis.hard_sets_by_muscle (single shared definition).
 
 `block_state` is COMPUTED, NOT PERSISTED: weeks/blocks since the last
-deload-phase session — input to the mandatory-deload floor ("deload by the
+deload-phase TRAINING session (habit sessions excluded) — input to the
+mandatory-deload floor ("deload by the
 3rd mesocycle regardless", Training ch04). `session_gap` is likewise
-computed, not persisted: weeks since the last logged session + whether the
+computed, not persisted: weeks since the last logged training session (habit sessions excluded) + whether the
 staleness threshold is crossed (a labeled heuristic — see
 REASSESSMENT_GAP_WEEKS below). body_weight_kg / waist_cm are
 None until a daily logging path exists — honest "I don't have that data".
@@ -48,7 +49,8 @@ _WINDOW_DAYS = 28
 # HEURISTIC, NOT book-sourced: detraining timelines are not covered by the
 # vendored books (docs/IDEAS.md #1) — the only layoff note is Nutrition ch02's
 # caveat that the 2-week maintenance method is invalid for returning lifters.
-# A gap (weeks since the last logged session) at/above this arms the intake's
+# A gap (weeks since the last logged TRAINING session; habits excluded)
+# at/above this arms the intake's
 # staleness nudge: cite stored values and confirm them before programming.
 # Single source — snapshot, working memory, and the intake scan all read the
 # verdict from session_gap(); change the threshold HERE only.
@@ -56,7 +58,8 @@ REASSESSMENT_GAP_WEEKS = 8.0
 
 
 def session_gap(today: date | None = None) -> SessionGap:
-    """Weeks since the last logged session (any phase) + staleness verdict.
+    """Weeks since the last logged TRAINING session (any phase; habit
+    sessions excluded) + staleness verdict.
 
     computed, NOT persisted (same policy as block_state). Weeks are rounded
     to 1dp BEFORE the comparison so the exposed number and the verdict always
@@ -65,7 +68,9 @@ def session_gap(today: date | None = None) -> SessionGap:
     itself; there is nothing stale to re-confirm).
     """
     today = today or date.today()
-    row = get_duckdb().execute("SELECT MAX(date) FROM sessions").fetchone()
+    # habits are not training sessions: a daily habit must not reset the gap
+    row = get_duckdb().execute(
+        "SELECT MAX(date) FROM sessions WHERE kind = 'training'").fetchone()
     last = row[0] if row else None
     if last is None:
         return SessionGap()
@@ -110,9 +115,10 @@ def _specialization_1rms(sets_df: pl.DataFrame) -> dict[str, float]:
 
 
 def _block_state(today: date) -> dict[str, Any]:
-    # Mandatory-deload floor input (Training ch04): time since last deload.
+    # Mandatory-deload floor input (Training ch04): time since the last deload
+    # TRAINING session — a habit tagged deload is not a deload.
     row = get_duckdb().execute(
-        "SELECT MAX(date) FROM sessions WHERE phase = 'deload'"
+        "SELECT MAX(date) FROM sessions WHERE phase = 'deload' AND kind = 'training'"
     ).fetchone()
     last = row[0] if row else None
     if last is None:

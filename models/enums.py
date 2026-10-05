@@ -76,6 +76,20 @@ class WeightUnit(str, Enum):
     lb = "lb"
 
 
+class SessionKind(str, Enum):
+    """What a logged session is (sessions.kind, migration 0003).
+
+    A `habit` is a standing daily item done outside training (e.g. 60
+    bodyweight squats every morning): its sets are sets and count toward
+    volume, but it is not a training session — it never feeds recovery,
+    the session-gap / staleness signal, deload block state or the phase
+    resolver.
+    """
+
+    training = "training"
+    habit = "habit"
+
+
 class PhaseType(str, Enum):
     maintenance = "maintenance"            # off-season / no specific push
     reconditioning = "reconditioning"      # return from layoff or into base work

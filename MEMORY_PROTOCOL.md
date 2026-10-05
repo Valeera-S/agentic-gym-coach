@@ -17,7 +17,7 @@ Contents:
     Active injury flags (via check_exercise_safety)
     Current phase parameters (from latest phase_snapshots)
     Pre-session recovery score (via compute_recovery_score)
-    Weeks since the last logged session (staleness context for the intake’s confirm-present step)
+    Weeks since the last logged training session (habit sessions excluded) (staleness context for the intake’s confirm-present step)
 Lifecycle: Loaded at session init → Updated in real-time during logging → Discarded at session end (persisted changes already written to Tier 2).
 Refresh Trigger: User says "refresh plan" or recovery score changes mid-session.
 

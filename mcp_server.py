@@ -74,8 +74,14 @@ def _run(cmd: str, args: dict) -> dict:
 @mcp.tool()
 def coach_log_session(date: str, exercises: list[dict], phase: str | None = None,
                       post_feedback: str | None = None,
-                      pre_recovery_score: int | None = None) -> dict:
-    """Persist a training session (validated, canonicalized, anomaly-flagged).
+                      pre_recovery_score: int | None = None,
+                      kind: str = coach_tools.DEFAULT_SESSION_KIND) -> dict:
+    """Persist a session (validated, canonicalized, anomaly-flagged).
+
+    kind: 'training' (default) | 'habit' — a standing daily item done outside
+    training (e.g. 60 bodyweight squats every morning): it counts toward volume
+    but never toward recovery, the session-gap signal, deload block state or the
+    phase fallback.
 
     exercises: [{name, sets, reps[], rpe[], weight_kg[] | (weight[] + unit), load_type?, tempo?,
     form_quality?, pain_flag?, notes?}] — arrays are per-set, equal length; weight_kg null =
@@ -87,7 +93,7 @@ def coach_log_session(date: str, exercises: list[dict], phase: str | None = None
     """
     return _run("log_session", {"date": date, "exercises": exercises,
                                 "phase": phase, "post_feedback": post_feedback,
-                                "pre_recovery_score": pre_recovery_score})
+                                "pre_recovery_score": pre_recovery_score, "kind": kind})
 
 
 @mcp.tool()
@@ -112,19 +118,19 @@ def coach_trend(muscle: str,
 
 @mcp.tool()
 def coach_snapshot() -> dict:
-    """Compute the 4-week phase snapshot and UPSERT today's phase_snapshots row (re-running rewrites today's anchor; incl. block_state: time since last deload, and session_gap: weeks since the last logged session)."""
+    """Compute the 4-week phase snapshot and UPSERT today's phase_snapshots row (re-running rewrites today's anchor; incl. block_state: time since last deload, and session_gap: weeks since the last logged training session (habit sessions excluded))."""
     return _run("snapshot", {})
 
 
 @mcp.tool()
 def coach_intake_status() -> dict:
-    """Run the standardized intake scan: collected vs missing bucket-list fields (each citing its book source), per-domain readiness (training/nutrition soft gates), and weeks since the last logged session. Read-only — ask the user only for what's missing."""
+    """Run the standardized intake scan: collected vs missing bucket-list fields (each citing its book source), per-domain readiness (training/nutrition soft gates), and weeks since the last logged training session (habit sessions excluded). Read-only — ask the user only for what's missing."""
     return _run("intake_status", {})
 
 
 @mcp.tool()
 def coach_sessions(limit: int = coach_tools.DEFAULT_SESSIONS_LIMIT) -> dict:
-    """List recent sessions (id, date, phase, pre_recovery_score, post_feedback)."""
+    """List recent sessions (id, date, phase, pre_recovery_score, post_feedback, kind)."""
     return _run("sessions", {"limit": limit})
 
 

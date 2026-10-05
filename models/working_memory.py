@@ -25,7 +25,8 @@ class WorkingMemoryState(BaseModel):
     autoregulation_required: bool = False
     onboarding_required: bool = False  # no user profile yet — the intake scan reports everything missing
     # staleness context for the intake's confirm-present step (weeks since the
-    # last logged session; threshold = skills.snapshot.REASSESSMENT_GAP_WEEKS)
+    # last logged training session, habits excluded; threshold =
+    # skills.snapshot.REASSESSMENT_GAP_WEEKS)
     weeks_since_last_session: float | None = None
     recent_trends: dict[MuscleGroup, TrendReport] = Field(default_factory=dict)
 
