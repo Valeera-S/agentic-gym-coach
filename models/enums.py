@@ -81,9 +81,10 @@ class SessionKind(str, Enum):
 
     A `habit` is a standing daily item done outside training (e.g. 60
     bodyweight squats every morning): its sets are sets and count toward
-    volume, but it is not a training session — it never feeds recovery,
-    the session-gap / staleness signal, deload block state or the phase
-    resolver.
+    volume, but it is not a training session — it never feeds recovery's
+    training-load inputs, the session-gap / staleness signal, deload block
+    state or the phase resolver. Pain logged during a habit DOES count
+    toward recovery (pain is about the body, not the training load).
     """
 
     training = "training"

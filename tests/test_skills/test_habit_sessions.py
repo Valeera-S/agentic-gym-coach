@@ -58,10 +58,17 @@ def test_daily_habits_do_not_look_like_training_to_recovery():
     assert r.score == compute_recovery_score(D + timedelta(days=365)).score  # as if empty
 
 
-def test_habit_pain_is_not_a_recovery_input():
+def test_habit_pain_still_lowers_recovery():
+    """Human decision: pain is about the body, not the training load, so pain
+    flagged during a habit counts — while the habit stays out of every
+    training-load component."""
     log_session(SessionInput(date=D - timedelta(days=1), kind="habit", exercises=[
         ExerciseModel(name="Bodyweight Squat", sets=1, reps=[20], pain_flag=True)]))
-    assert compute_recovery_score(D).components["pain_events_7d"] == 0
+    r = compute_recovery_score(D)
+    assert r.components["pain_events_7d"] == 1
+    assert r.components["trained_yesterday"] is False
+    assert r.components["sets_7d"] == 0
+    assert r.score == 100 + 10 - 20  # well-rested bonus, minus one pain event
 
 
 def test_training_still_counts_beside_habits():

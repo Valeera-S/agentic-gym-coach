@@ -80,8 +80,8 @@ def coach_log_session(date: str, exercises: list[dict], phase: str | None = None
 
     kind: 'training' (default) | 'habit' — a standing daily item done outside
     training (e.g. 60 bodyweight squats every morning): it counts toward volume
-    but never toward recovery, the session-gap signal, deload block state or the
-    phase fallback.
+    but never toward recovery's training load, the session-gap signal, deload
+    block state or the phase fallback (pain logged in a habit still lowers recovery).
 
     exercises: [{name, sets, reps[], rpe[], weight_kg[] | (weight[] + unit), load_type?, tempo?,
     form_quality?, pain_flag?, notes?}] — arrays are per-set, equal length; weight_kg null =

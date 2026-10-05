@@ -11,8 +11,10 @@ big negative, consecutive days add fatigue, rest days give a small bonus.
 Re-tune against real outcomes once enough history exists.
 
 Habit sessions (kind = 'habit', e.g. daily bodyweight squats) are not
-training: they are excluded from every input here, so a daily habit never
-makes the score think the user trained that day.
+training: they are excluded from the training-load inputs here (days since
+the last session, 7-day sets, trained yesterday / the day before), so a
+daily habit never makes the score think the user trained that day. Pain
+flagged during a habit DOES count: it is about the body, not training load.
 
 Pre-session semantics: every component reads days strictly BEFORE the query
 date — a session already logged on that date is excluded (counting it would
@@ -30,7 +32,8 @@ from models import RecoveryScore
 from .init import get_duckdb
 
 
-# Recovery reads training sessions only (habits are not training).
+# Training-load inputs read training sessions only (habits are not training);
+# pain is the one input that reads every session.
 _TRAINING = "kind = 'training'"
 
 
@@ -58,11 +61,13 @@ def _sets_in_window(start: date, end: date) -> int:
 
 
 def _pain_in_window(start: date, end: date) -> int:
+    # Pain counts from EVERY session, habits included: pain is a signal
+    # about the body, not about training load (human decision on F12).
     row = get_duckdb().execute(
-        f"""
+        """
         SELECT count(*) FROM (
             SELECT UNNEST(s.exercises).pain_flag AS pf
-            FROM sessions s WHERE s.date BETWEEN ? AND ? AND {_TRAINING}
+            FROM sessions s WHERE s.date BETWEEN ? AND ?
         ) WHERE pf
         """,
         [start, end],
