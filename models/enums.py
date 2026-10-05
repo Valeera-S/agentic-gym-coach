@@ -141,11 +141,13 @@ class TrendDirection(str, Enum):
 
 
 class AnomalyCode(str, Enum):
-    """Exactly the codes session_logger emits when writing a session."""
+    """Exactly the codes session_logger emits when writing a session (and,
+    for `amend_not_applied`, the amend tool)."""
 
     pain_flag = "pain_flag"
     form_quality_low = "form_quality_low"
     needs_review = "needs_review"
+    amend_not_applied = "amend_not_applied"  # a value copied from a replaced exercise
 
 
 class DecisionEventType(str, Enum):

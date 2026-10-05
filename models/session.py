@@ -10,7 +10,8 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import (BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator,
+                      model_validator)
 
 from .enums import AnomalyCode, LoadType, MuscleGroup, PhaseType, SessionKind, WeightUnit
 
@@ -184,21 +185,97 @@ class AnomalyFlag(BaseModel):
     detail: str
 
 
+# Keys coach_session_detail returns that are NOT inputs: derived or stored
+# provenance. An amend exercise carrying one is rejected rather than silently
+# ignored, so an edit made to one of them can never vanish without a word.
+_READ_BACK_ONLY = {
+    "raw_name": "restating the stored `name` keeps it; a new `name` is recorded as typed",
+    "muscle_source": "it is recorded by the tool; restate `muscle_group` to keep it, omit it to "
+                     "re-derive, set `confirm_muscle` to record the user's confirmation",
+    "needs_review": "it is derived on read",
+    "review_detail": "it is derived on read",
+    "load_type_unknown": "it is derived on read; pass `load_type`",
+    "weight_as_entered": "send `weight` + `unit` (or `weight_kg`)",
+    "unit_as_entered": "send `weight` + `unit` (or `weight_kg`)",
+    "entered_weight": "send it as `weight` with `unit`",
+    "entered_unit": "send it as `unit` with `weight`",
+}
+
+
+class AmendExerciseModel(ExerciseModel):
+    """An exercise in coach_session_amend: ExerciseModel's input fields plus
+    the link to what it amends.
+
+    Every amend exercise says what it is, explicitly — nothing is inferred
+    from names or positions: `index` is the stored exercise it restates or
+    edits (its `index` in coach_session_detail), `new: true` marks one that
+    was not logged before. Exactly one of the two. Stored exercises no amend
+    exercise references are removed.
+
+    Unknown keys are rejected (a fresh log ignores them); read-back-only keys
+    from coach_session_detail are rejected with a hint naming the input to
+    send instead. `confirm_muscle` records `muscle_group` as the user's own
+    (muscle_source caller) even where it restates the stored one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: StrictInt | None = Field(default=None, ge=0)
+    new: StrictBool = False
+    confirm_muscle: StrictBool = False
+
+    @model_validator(mode="after")
+    def _index_or_new(self) -> "AmendExerciseModel":
+        if (self.index is None) == (not self.new):
+            raise ValueError(
+                "each amend exercise needs exactly one of `index` (the stored exercise it "
+                "restates or edits, from coach_session_detail) or `new: true` (one not logged "
+                f"before); got index={self.index}, new={self.new} for '{self.name}'")
+        return self
+
+    @model_validator(mode="after")
+    def _confirm_needs_a_muscle(self) -> "AmendExerciseModel":
+        if self.confirm_muscle and self.muscle_group is None:
+            raise ValueError("confirm_muscle needs the confirmed `muscle_group`")
+        return self
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_read_back_keys(cls, data):
+        if isinstance(data, dict):
+            found = [k for k in _READ_BACK_ONLY if k in data]
+            if found:
+                hints = "; ".join(f"`{k}`: {_READ_BACK_ONLY[k]}" for k in found)
+                raise ValueError(
+                    "amend exercises take the logging fields, not the read-back shape "
+                    f"({hints}). Build each exercise from index (or new: true), name, "
+                    "sets, reps, rpe, weight + unit or weight_kg, load_type, tempo, "
+                    "form_quality, pain_flag, notes, muscle_group (restate it to keep "
+                    "it), confirm_muscle")
+        return data
+
+
 class SessionAmendInput(BaseModel):
     """What coach_session_amend takes: a session's new content.
 
     `date` and `exercises` replace the stored ones wholesale and are
-    re-validated and re-canonicalized exactly like a fresh log. Every other
+    re-validated and re-canonicalized like a fresh log, except for the stored
+    provenance a restatement keeps (below). Every other
     field is optional and, when omitted OR null, KEEPS its stored value —
     correcting a session's exercises must never silently clear the user's
     feedback or recovery score, or turn a habit into training. Removing a
     stored post_feedback / pre_recovery_score is an explicit act: name it in
     `clear` (it may not also be given a value).
+
+    Exercises are AmendExerciseModel (input fields only). An exercise that
+    references a stored one by `index`, as the same exercise, keeps its
+    unchanged stored provenance — see
+    skills.sessions._provenance_to_keep.
     """
 
     session_id: UUID
     date: date
-    exercises: list[ExerciseModel]
+    exercises: list[AmendExerciseModel]
     phase: PhaseType | None = None
     kind: SessionKind | None = None
     pre_recovery_score: int | None = Field(default=None, ge=0, le=100)
@@ -207,6 +284,9 @@ class SessionAmendInput(BaseModel):
 
     @model_validator(mode="after")
     def _clear_or_set_not_both(self) -> "SessionAmendInput":
+        indexes = [ex.index for ex in self.exercises if ex.index is not None]
+        if len(indexes) != len(set(indexes)):
+            raise ValueError("an `index` may be referenced by one amend exercise only")
         for name in self.clear:
             if getattr(self, name) is not None:
                 raise ValueError(f"{name} is both given a value and listed in `clear`")
@@ -241,12 +321,17 @@ class LogConfirmation(BaseModel):
 class ExerciseDetail(BaseModel):
     """One logged exercise exactly as stored (read-back, coach_session_detail).
 
+    `index` is its position in the stored session — the handle
+    coach_session_amend takes to say which stored exercise an amend
+    exercise restates or edits.
+
     Stored values are reported as-is — vocabulary fields are plain strings so
     a read never fails on what an older version stored. Provenance fields
     (raw_name, muscle_source, load_type, entered_*) are None on rows logged
     before migration 0003, meaning "unknown".
     """
 
+    index: int | None = None                 # position in the stored session (amend handle)
     name: str                                # canonical identity (or the raw name if unmapped)
     raw_name: str | None = None              # what the caller typed
     muscle_group: str | None = None          # stored primary

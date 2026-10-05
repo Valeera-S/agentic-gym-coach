@@ -32,8 +32,11 @@ from functools import lru_cache
 from uuid import UUID
 
 from models import (
+    AnomalyCode,
+    AnomalyFlag,
     DecisionEventType,
     ExerciseDetail,
+    LoadType,
     MuscleGroup,
     MuscleSource,
     PhaseType,
@@ -41,8 +44,10 @@ from models import (
     SessionChange,
     SessionDetail,
     SessionInput,
+    WeightUnit,
 )
-from models.exercise_catalog import resolve_name
+from models.exercise_catalog import classify, default_load_type, lookup_key, resolve_name
+from models.session import _same_loads
 
 from .init import get_duckdb
 from .session_logger import prepare_session, review_detail
@@ -86,12 +91,13 @@ def _needs_review(name: str | None, source: str | None) -> bool:
     return True  # a source this version does not know: never assume it is confirmed
 
 
-def _exercise(e: dict) -> ExerciseDetail:
+def _exercise(e: dict, index: int | None = None) -> ExerciseDetail:
     source = e.get("muscle_source")
     flag = _needs_review(e["name"], source)
     detail = _review_text(e["name"], e.get("muscle_group"), source) if flag else None
     unit = e.get("entered_unit")
     return ExerciseDetail(
+        index=index,
         name=e["name"],
         raw_name=e.get("raw_name"),
         muscle_group=e.get("muscle_group"),
@@ -171,7 +177,8 @@ def list_sessions(limit: int) -> list[dict]:
 
 def _row_to_detail(row: tuple) -> SessionDetail:
     sid, d, phase, kind, score, feedback, created, exercises = row
-    exs = [_exercise(e) for e in (exercises or []) if e is not None and e.get("name") is not None]
+    exs = [_exercise(e, i) for i, e in enumerate(exercises or [])
+           if e is not None and e.get("name") is not None]
     return SessionDetail(
         id=sid, date=d, phase=phase, kind=kind, pre_recovery_score=score,
         post_feedback=feedback, created_at=created, exercises=exs,
@@ -264,18 +271,146 @@ def _amended(data: SessionAmendInput, name: str, before: dict):
     return value if value is not None else before[name]
 
 
+def _identity(name: str | None) -> str:
+    """Catalog identity, or for an unknown name its lookup key (case and
+    whitespace insensitive, like the catalog's own lookups)."""
+    return (resolve_name(name) or lookup_key(name)) if name else ""
+
+
+def _referenced(exercises: list, stored: list[dict]) -> list[tuple[dict, bool] | None]:
+    """Per amend exercise: (the stored exercise its `index` names, same
+    identity?) or None for a `new` one. An index outside the stored session
+    is invalid input."""
+    out: list[tuple[dict, bool] | None] = []
+    for ex in exercises:
+        if ex.index is None:
+            out.append(None)
+            continue
+        if (ex.index >= len(stored) or stored[ex.index] is None
+                or stored[ex.index].get("name") is None):
+            raise ValueError(f"index {ex.index} ('{ex.name}') is not an exercise of this "
+                             "session; use the indexes coach_session_detail shows")
+        s = stored[ex.index]
+        out.append((s, _identity(s.get("name")) == _identity(ex.name)))
+    return out
+
+
+def _provenance_to_keep(exercises: list, stored: list[dict] | None,
+                        ) -> tuple[list[dict | None], list[AnomalyFlag]]:
+    """What an amend keeps from the stored exercise each one references.
+
+    An amend is usually built from coach_session_detail, whose exercises
+    carry the stored canonical name, muscle, load_type and weight_kg.
+    Re-validated like a fresh log, those would read as "the user typed the
+    canonical name", "caller set this muscle", "the identity's default
+    load" and "the user entered kg" — rewriting provenance nobody touched.
+    Each amend exercise names its stored exercise by `index` (or is `new`:
+    a fresh log, nothing kept). Of a referenced exercise of the SAME
+    identity it keeps:
+      - raw_name (also NULL = unknown), when `name` is exactly the stored name
+        (a pre-0003 stored name the catalog now maps to another identity
+        was typed as is, and becomes the raw_name);
+      - muscle_source (also NULL), when `muscle_group` equals the stored
+        muscle and `confirm_muscle` is not set — so restating never turns a
+        guess into a caller-confirmed muscle and never re-decides a stored
+        muscle. OMITTING `muscle_group` re-derives it like a fresh log (the
+        way to replace an old guess); `confirm_muscle` records it as the
+        caller's;
+      - load_type, when none is given (NULL stays unknown);
+      - weight + unit as entered, when only `weight_kg` is given and it
+        equals the stored kg loads of a weight + unit entry.
+    A referenced exercise of a DIFFERENT identity is a rename: it keeps only
+    the weight + unit as entered (same rule), and values copied from the old
+    exercise that were NOT the user's own are not applied to the new name —
+    a `muscle_group` equal to its stored non-caller muscle (unless
+    `confirm_muscle`), and a `load_type` equal to its stored one where the
+    new identity's default differs (that default applies). A caller-set
+    muscle carries over. Each value not applied that changes the result is
+    returned as an `amend_not_applied` flag naming it; restate it to apply it
+    (`confirm_muscle`, or a follow-up amend for load_type).
+    Changed values go through as changes.
+    Mutates `exercises` (muscle_group / load_type / weight + unit) in place.
+    Returns (keep, flags).
+    """
+    keep: list[dict | None] = []
+    flags: list[AnomalyFlag] = []
+    for ex, m in zip(exercises, _referenced(exercises, list(stored or []))):
+        if m is None:
+            keep.append(None)
+            continue
+        s, same = m
+        restated_muscle = (ex.muscle_group is not None and not ex.confirm_muscle
+                           and ex.muscle_group.value == s.get("muscle_group"))
+        if (ex.unit is None and not ex.weight and ex.weight_kg
+                and s.get("entered_unit") and s.get("entered_weight")
+                and _same_loads(list(s.get("weight_kg") or []), ex.weight_kg)):
+            ex.weight = list(s["entered_weight"])
+            ex.unit = WeightUnit(s["entered_unit"])
+        if not same:
+            flags.extend(_not_carried_on_rename(ex, s, restated_muscle))
+            keep.append(None)
+            continue
+        k: dict = {}
+        if ex.name == s.get("name"):
+            raw = s.get("raw_name")
+            if raw is None and resolve_name(s["name"]) not in (None, s["name"]):
+                # pre-0003: a name unknown back then was stored as typed, and
+                # every old canonical name still resolves to itself — so a
+                # stored name the catalog now maps elsewhere IS what was typed
+                raw = s["name"]
+            k["raw"] = raw
+        if restated_muscle:
+            k["source"] = s.get("muscle_source")
+        if ex.load_type is None:
+            if s.get("load_type"):
+                ex.load_type = LoadType(s["load_type"])
+            else:
+                k["load_type_null"] = True
+        keep.append(k)
+    return keep, flags
+
+
+def _not_carried_on_rename(ex, replaced: dict, restated_muscle: bool) -> list[AnomalyFlag]:
+    """Drop values a renamed exercise copied from the one it replaces, unless
+    they were the user's own; one flag per value that changes the result."""
+    flags: list[AnomalyFlag] = []
+    new = classify(ex.name)
+    old_name = replaced.get("name")
+    if restated_muscle and replaced.get("muscle_source") != MuscleSource.caller.value:
+        given = ex.muscle_group
+        ex.muscle_group = None  # derived for the new name, like a fresh log
+        if new.muscle_group is not given:
+            flags.append(AnomalyFlag(code=AnomalyCode.amend_not_applied, detail=(
+                f"{new.name}: muscle_group {given.value} matched the replaced exercise "
+                f"'{old_name}' and was not applied; resend it with confirm_muscle: true "
+                "if the user stated it")))
+    default = default_load_type(new.name)
+    if (ex.load_type is not None and ex.load_type.value == replaced.get("load_type")
+            and ex.load_type is not default):
+        given = ex.load_type
+        ex.load_type = None  # the new identity's default (or unknown) applies
+        flags.append(AnomalyFlag(code=AnomalyCode.amend_not_applied, detail=(
+            f"{new.name}: load_type {given.value} matched the replaced exercise "
+            f"'{old_name}' and was not applied ("
+            + (f"default {default.value}" if default else "left unknown")
+            + "); restate it in a follow-up amend if the user stated it")))
+    return flags
+
+
 def amend_session(data: SessionAmendInput) -> SessionChange:
     """Replace a session's date and exercises, keeping its id (and created_at).
 
-    The new content goes through prepare_session(), exactly like a fresh log.
-    Fields left out or null (phase, kind, pre_recovery_score, post_feedback)
-    keep their stored values; `clear` removes post_feedback /
-    pre_recovery_score explicitly.
+    The new content goes through prepare_session(), like a fresh log,
+    except that an exercise restating a stored one keeps its stored
+    provenance (_provenance_to_keep). Fields left out or null (phase, kind,
+    pre_recovery_score, post_feedback) keep their stored values; `clear`
+    removes post_feedback / pre_recovery_score explicitly.
     """
     sid = data.session_id
     before = _snapshot(sid)
     if before is None:
         raise ValueError(f"no session with id {sid}")
+    keep, carry_flags = _provenance_to_keep(data.exercises, before["exercises"])
     fresh = SessionInput(
         date=data.date, exercises=data.exercises,
         phase=data.phase or (PhaseType(before["phase"]) if before["phase"] else None),
@@ -283,7 +418,8 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
         pre_recovery_score=_amended(data, "pre_recovery_score", before),
         post_feedback=_amended(data, "post_feedback", before),
     )
-    phase, structs, flags = prepare_session(fresh)
+    phase, structs, flags = prepare_session(fresh, keep)
+    flags = carry_flags + flags
 
     def work():
         get_duckdb().execute(

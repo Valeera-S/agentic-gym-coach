@@ -138,7 +138,8 @@ def coach_sessions(limit: int = coach_tools.DEFAULT_SESSIONS_LIMIT) -> dict:
 def coach_session_detail(session_id: str | None = None, date: str | None = None) -> dict:
     """Read back logged session(s) in full — give exactly ONE of session_id or date (a date may hold several sessions).
 
-    Returns {sessions: [...]}: every exercise with its identity and raw_name as typed, sets/reps/rpe,
+    Returns {sessions: [...]}: every exercise with its `index` (the handle coach_session_amend takes),
+    its identity and raw_name as typed, sets/reps/rpe,
     weight_kg plus the user's own numbers (weight_as_entered + unit_as_entered), load_type
     (load_type_unknown when not recorded), muscle_group + muscle_source, and needs_review with the reason.
     Unknown id or date -> invalid_input.
@@ -155,10 +156,21 @@ def coach_session_amend(session_id: str, date: str, exercises: list[dict],
     """Replace a logged session's date and exercises (same id). ONLY after showing the user the
     current entry (coach_session_detail) and the correction, and getting their explicit yes.
 
-    date + exercises replace the stored ones and are validated/canonicalized exactly like a fresh log
+    date + exercises replace the stored ones and are validated/canonicalized like a fresh log (exceptions below)
     (malformed input is rejected before any write). Every other field omitted OR null KEEPS its stored
     value (phase, kind, post_feedback, pre_recovery_score) — pass one only to change it. To REMOVE a
     stored post_feedback / pre_recovery_score, name it in `clear` (e.g. clear=["pre_recovery_score"]).
+    Exercises take the logging fields (name, sets, reps, rpe, weight_kg | weight + unit, load_type,
+    tempo, form_quality, pain_flag, notes, muscle_group, confirm_muscle) plus EXACTLY ONE of
+    `index` (the stored exercise it restates/edits, from coach_session_detail) or `new: true`;
+    unreferenced stored exercises are removed. Read-back-only keys (raw_name, muscle_source,
+    entered_weight, ...) -> invalid_input. An exercise restated unchanged keeps what was recorded
+    (raw name, weight + unit, load_type, muscle provenance; an older entry whose name the catalog
+    now maps to another identity is canonicalized, with that name kept as its raw_name). Omit
+    muscle_group to re-derive it (fixes an old guess); confirm_muscle=true records it as the user's;
+    on a rename (same index, different exercise) a muscle_group copied from the old exercise that is
+    not recorded as the user's own, or any load_type copied from it, is not applied (flagged
+    amend_not_applied where that changes the result).
     Returns the session-level values now stored.
     The complete previous version is written to the audit trail. Unknown id -> invalid_input.
     """

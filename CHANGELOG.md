@@ -16,9 +16,21 @@ and called progressing lifters "stalled".
   user's own weights and unit, load_type, muscle_source and a per-exercise
   `needs_review`. `coach_sessions` gains a `needs_review` count.
 - **`coach_session_amend` / `coach_session_delete`** — corrections through a
-  supported path. Amend re-validates exactly like a fresh log and keeps the
+  supported path. Amend re-validates like a fresh log and keeps the
   id; omitted fields keep their stored values, `clear` removes them
-  explicitly. Both write the complete previous row to `decision_log.payload`
+  explicitly. Amend exercises take the logging fields only (the read-back
+  shape is rejected, naming the field). Each names what it amends:
+  `index` (the stored exercise, numbered by `coach_session_detail`) or
+  `new: true`; a restatement keeps exactly what was recorded (raw
+  name, weight + unit as entered, load_type, how its muscle was decided —
+  unknowns on older rows stay unknown, except that an older row's name the
+  catalog has since learned as an alias is canonicalized and kept as the raw
+  name, since that is what was typed). Omitting `muscle_group` re-derives
+  it (the way to fix an old guess); `confirm_muscle` records the user's
+  confirmation; a muscle not recorded as the user's own, or a load type, copied onto
+  a renamed exercise is not applied, and flagged `amend_not_applied`
+  where that changes the result. Both write the complete previous row to
+  `decision_log.payload`
   (migration 0004) — restorable from the audit entry alone. The persona
   requires the user's explicit yes before either.
 - **Units and load types** — log `weight` + `unit` ('kg' | 'lb'; 1 lb =

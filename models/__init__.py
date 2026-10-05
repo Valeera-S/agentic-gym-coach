@@ -42,6 +42,7 @@ from .profile import (
 from .session import (
     AnomalyFlag,
     ExerciseDetail,
+    AmendExerciseModel,
     ExerciseModel,
     LogConfirmation,
     SessionAmendInput,
@@ -83,6 +84,7 @@ __all__ = [
     "SafetyResult",
     "AnomalyFlag",
     "ExerciseDetail",
+    "AmendExerciseModel",
     "ExerciseModel",
     "SessionAmendInput",
     "SessionChange",
