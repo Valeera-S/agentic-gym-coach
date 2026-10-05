@@ -32,15 +32,18 @@ from typing import Any
 import polars as pl
 
 from models import PhaseSnapshot, SessionGap
+from models.exercise_catalog import legacy_family
 
 from .init import get_duckdb
 from .injuries import tendon_summary
 from .metrics import epley_expr, qualifies_for_est_1rm
 from .phase import current_phase
 from .profile import derive_priority_muscles, get_profile
-from .trend_analysis import hard_sets_by_muscle
+from .trend_analysis import hard_sets_by_muscle, with_identity
 
-# Representative lifts / muscle: {canonical_exercise: muscle_label}
+# Representative lifts. Each may be a generic / pre-split name: every concrete
+# identity in its family is reported under its OWN name, never pooled — the
+# loads of different implements are not comparable (exercise_catalog).
 REPRESENTATIVE_LIFTS = [
     "Incline Bench Press", "Shoulder Press", "Reverse Fly", "Pull-Up", "Row",
 ]
@@ -106,11 +109,13 @@ def _specialization_1rms(sets_df: pl.DataFrame) -> dict[str, float]:
         .then(epley_expr("weight_kg", "reps"))
         .alias("est_1rm")
     )
+    per_set = with_identity(per_set)
     out: dict[str, float] = {}
-    for ex in REPRESENTATIVE_LIFTS:
-        val = per_set.filter(pl.col("name") == ex).select(pl.col("est_1rm").max()).item()
-        if val is not None:
-            out[ex] = round(float(val), 1)
+    for rep in REPRESENTATIVE_LIFTS:
+        for ident in sorted(legacy_family(rep) or {rep}):
+            val = per_set.filter(pl.col("identity") == ident).select(pl.col("est_1rm").max()).item()
+            if val is not None:
+                out[ident] = round(float(val), 1)
     return out
 
 

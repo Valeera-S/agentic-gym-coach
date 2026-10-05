@@ -47,11 +47,26 @@ def test_kg_entry_through_weight_plus_unit():
 
 
 def test_legacy_weight_kg_call_behaves_exactly_as_before():
+    # a generic name says nothing about the implement: no default is assumed
     log_session(SessionInput(date=T, exercises=[ExerciseModel(
-        name="Lat Pulldown", sets=2, reps=[10, 10], weight_kg=[22.68, 22.68])]))
+        name="Row", sets=2, reps=[10, 10], weight_kg=[22.68, 22.68])]))
     assert _stored("weight_kg") == [22.68, 22.68]
     assert _stored("entered_weight") is None and _stored("entered_unit") is None
     assert _stored("load_type") is None  # unknown, never guessed
+
+
+def test_catalog_identity_supplies_a_default_load_type():
+    log_session(SessionInput(date=T, exercises=[ExerciseModel(
+        name="lat pulldown", sets=2, reps=[10, 10], weight_kg=[22.68, 22.68])]))
+    assert _stored("load_type") == "machine_stack"
+
+
+def test_caller_load_type_overrides_the_catalog_default():
+    # a one-arm dumbbell movement: the caller says `total`, the default is per_hand
+    log_session(SessionInput(date=T, exercises=[ExerciseModel(
+        name="Dumbbell Lateral Raise", sets=1, reps=[12], weight_kg=[7.0],
+        load_type="total")]))
+    assert _stored("load_type") == "total"
 
 
 def test_bodyweight_entry_with_null_weights_in_lb():
@@ -100,7 +115,7 @@ def test_mcp_wrapper_accepts_the_lb_form():
 
 def _tonnage(load_type: str | None, muscle=MuscleGroup.biceps) -> dict:
     log_session(SessionInput(date=T, exercises=[ExerciseModel(
-        name="Hammer Curl", muscle_group=muscle, sets=2, reps=[10, 10],
+        name="Curl", muscle_group=muscle, sets=2, reps=[10, 10],  # generic: no default
         weight_kg=[10.0, 10.0], load_type=load_type)]))
     return get_specialization_trend(muscle, window_days=7).detail
 

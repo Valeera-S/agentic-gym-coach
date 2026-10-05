@@ -92,10 +92,12 @@ def test_injuries_seed_via_dispatch_canonicalizes_and_gates():
     })
     assert out["ok"] is True
     assert out["needs_review"] == []
-    assert out["injury"]["contraindicated_exercises"] == ["Skull Crusher"]
+    # dumbbell skull crushers are their own identity now (different implement)
+    assert out["injury"]["contraindicated_exercises"] == ["Dumbbell Skull Crusher"]
     from skills.safety_gate import check_exercise_safety
-    r = check_exercise_safety("Skull Crusher")
-    assert r.safe is False
+    assert check_exercise_safety("dumbbell skull crusher").safe is False
+    # the generic name may mean the banned variant: fail-closed
+    assert check_exercise_safety("Skull Crusher").safe is False
 
 
 def test_injuries_seed_via_dispatch_rejects_bad_vocab():

@@ -84,9 +84,13 @@ def test_overlap_secondary_muscles_credited():
     mid = get_specialization_trend(MuscleGroup.mid_back, window_days=28)
     rear = get_specialization_trend(MuscleGroup.rear_delt, window_days=28)
     biceps = get_specialization_trend(MuscleGroup.biceps, window_days=28)
-    # Helms ch03: primary and secondary count 1:1
+    lats = get_specialization_trend(MuscleGroup.lats, window_days=28)
+    # Helms ch03: primary and secondary count 1:1. Rows: lats is the chart's
+    # first-listed primary (stored), scapular retractors (mid_back) via overlap.
+    assert lats.effective_volume == pytest.approx(4.0)
+    assert lats.detail["overlap_sets"] == pytest.approx(0.0)
     assert mid.effective_volume == pytest.approx(4.0)
-    assert mid.detail["overlap_sets"] == pytest.approx(0.0)
+    assert mid.detail["overlap_sets"] == pytest.approx(4.0)
     assert rear.effective_volume == pytest.approx(4.0)
     assert rear.detail["overlap_sets"] == pytest.approx(4.0)
     assert biceps.effective_volume == pytest.approx(4.0)

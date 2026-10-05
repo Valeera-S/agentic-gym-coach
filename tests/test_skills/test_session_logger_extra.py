@@ -71,8 +71,8 @@ def test_alias_maps_to_canonical_name_and_group():
     name, mg = get_duckdb().execute(
         "SELECT exercises[1].name, exercises[1].muscle_group FROM sessions"
     ).fetchone()
-    assert name == "Shoulder Press"
-    assert str(mg) == "side_delt"
+    assert name == "Barbell Overhead Press"
+    assert str(mg) == "front_delt"  # ch03 vertical push: anterior delts primary
 
 
 def test_pre_recovery_score_bounds():

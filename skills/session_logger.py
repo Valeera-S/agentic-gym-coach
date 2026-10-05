@@ -6,7 +6,8 @@ Flow:
      (current snapshot → modal training-session phase → maintenance default) so the
      user never has to tag a phase.
   3. Canonicalize each exercise: fill muscle_group from the catalog and
-     store the canonical name (raw text survives in log.md).
+     store the canonical identity name, plus `raw_name` — what the caller
+     actually typed.
   4. Raise anomaly flags: pain_flag, form_quality<3, unmapped exercise.
   5. INSERT into sessions, RETURNING the generated id.
 
@@ -26,6 +27,8 @@ from models import (
     canonicalize,
 )
 
+from models.exercise_catalog import default_load_type
+
 from .init import get_duckdb
 from .phase import phase_for_logging
 
@@ -36,6 +39,9 @@ def _canonicalize_exercises(data: SessionInput) -> list[AnomalyFlag]:
         can_name, mg, needs_review = canonicalize(ex.name)
         if ex.muscle_group is None:
             ex.muscle_group = mg
+        if ex.load_type is None:
+            # the identity's default; a caller-supplied load_type always wins
+            ex.load_type = default_load_type(can_name)
         ex.name = can_name
         if needs_review:
             flags.append(AnomalyFlag(
@@ -53,10 +59,11 @@ def _canonicalize_exercises(data: SessionInput) -> list[AnomalyFlag]:
     return flags
 
 
-def _to_struct_list(exercises: list[ExerciseModel]) -> list[dict]:
+def _to_struct_list(exercises: list[ExerciseModel], raw_names: list[str]) -> list[dict]:
     return [
         {
             "name": ex.name,
+            "raw_name": raw,
             "muscle_group": ex.muscle_group.value if ex.muscle_group else None,
             "sets": ex.sets,
             "reps": ex.reps,
@@ -72,15 +79,18 @@ def _to_struct_list(exercises: list[ExerciseModel]) -> list[dict]:
             "entered_weight": ex.weight if ex.unit else None,
             "entered_unit": ex.unit.value if ex.unit else None,
         }
-        for ex in exercises
+        for ex, raw in zip(exercises, raw_names, strict=True)
     ]
 
 
 def log_session(data: SessionInput) -> LogConfirmation:
     phase = phase_for_logging(data.phase)
+    # What the caller typed, kept beside the canonical identity (read-back,
+    # and the record of what a canonicalization decision was made from).
+    raw_names = [ex.name for ex in data.exercises]
     flags = _canonicalize_exercises(data)
 
-    structs = _to_struct_list(data.exercises)
+    structs = _to_struct_list(data.exercises, raw_names)
     row = get_duckdb().execute(
         """
         INSERT INTO sessions (date, phase, pre_recovery_score, exercises, post_feedback, kind)

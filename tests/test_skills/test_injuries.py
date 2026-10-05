@@ -45,9 +45,9 @@ def test_seed_canonicalizes_alias_and_gate_blocks_canonical_query():
                       contraindicated_exercises=["Dumbbell Skull Crusher"],
                       safe_alternatives=["Tricep Pushdown"])
     assert isinstance(res, InjurySeedResult)
-    assert res.injury.contraindicated_exercises == ["Skull Crusher"]
+    assert res.injury.contraindicated_exercises == ["Dumbbell Skull Crusher"]
     assert res.needs_review == []
-    r = check_exercise_safety("Skull Crusher")
+    r = check_exercise_safety("Skull Crusher")  # generic name covers the banned variant
     assert r.safe is False
     assert "Tricep Pushdown" in r.alternatives
 

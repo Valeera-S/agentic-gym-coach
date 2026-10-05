@@ -120,13 +120,11 @@ def test_ratchet_catches_an_injected_deviation(monkeypatch):
     assert problems[0].startswith("NEW deviations") and "Lateral Raise" in problems[0]
 
 
-def test_ratchet_catches_a_fixed_but_still_listed_deviation(monkeypatch):
-    # Row's only deviation is the missing middle-delt credit; supply it.
-    assert "Row" in KNOWN_DEVIATIONS
-    monkeypatch.setitem(
-        SECONDARY_OVERLAP, "Row", [*SECONDARY_OVERLAP["Row"], MuscleGroup.side_delt]
-    )
-    problems = _ratchet_problems(compute_deviations(), KNOWN_DEVIATIONS)
+def test_ratchet_catches_a_fixed_but_still_listed_deviation():
+    # A baseline entry that no longer deviates must be removed. Synthetic
+    # baseline: the real one is empty now.
+    known = {"Row": "horizontal_pull: missing side_delt"}
+    problems = _ratchet_problems(compute_deviations(), known)
     assert len(problems) == 1
     assert "FIXED but still listed" in problems[0] and "'Row'" in problems[0]
 
@@ -136,8 +134,27 @@ def test_ratchet_catches_a_changed_deviation_detail(monkeypatch):
     monkeypatch.setitem(
         SECONDARY_OVERLAP, "Row", [*SECONDARY_OVERLAP["Row"], MuscleGroup.quads]
     )
-    problems = _ratchet_problems(compute_deviations(), KNOWN_DEVIATIONS)
+    known = {"Row": "horizontal_pull: missing side_delt"}
+    problems = _ratchet_problems(compute_deviations(), known)
     assert len(problems) == 1 and "details changed" in problems[0]
+
+
+def test_ratchet_catches_a_dropped_chart_muscle(monkeypatch):
+    # Removing a chart-derived credit by hand (here Row's middle delts) is caught.
+    monkeypatch.setitem(
+        SECONDARY_OVERLAP, "Row",
+        [m for m in SECONDARY_OVERLAP["Row"] if m is not MuscleGroup.side_delt])
+    assert compute_deviations() == {"Row": "horizontal_pull: missing side_delt"}
+
+
+def test_ratchet_catches_a_wrong_primary(monkeypatch):
+    # Shoulder Press once named side_delt primary; the chart says anterior delts.
+    from models import exercise_catalog
+    monkeypatch.setitem(exercise_catalog.PRIMARY, "Shoulder Press", MuscleGroup.side_delt)
+    monkeypatch.setitem(exercise_catalog.SECONDARY_OVERLAP, "Shoulder Press",
+                        [MuscleGroup.front_delt, MuscleGroup.triceps])
+    assert compute_deviations() == {
+        "Shoulder Press": "vertical_push: primary side_delt, chart says front_delt"}
 
 
 def test_unclassified_entry_fails_with_a_clear_message(monkeypatch):
@@ -151,7 +168,7 @@ def test_unclassified_entry_fails_with_a_clear_message(monkeypatch):
     assert "EXERCISE_PATTERN" in msg
 
 
-@pytest.mark.parametrize("name", sorted(KNOWN_DEVIATIONS))
-def test_known_deviation_is_a_real_catalog_entry(name):
+def test_known_deviations_are_real_catalog_entries():
     """Stops the baseline rotting into a list of names nothing matches."""
-    assert name in SECONDARY_OVERLAP, f"{name} is in KNOWN_DEVIATIONS but not the catalog"
+    for name in KNOWN_DEVIATIONS:
+        assert name in SECONDARY_OVERLAP, f"{name} is in KNOWN_DEVIATIONS but not the catalog"

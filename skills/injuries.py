@@ -18,9 +18,11 @@ validated and canonicalized:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from models import InjurySeedResult, InjuryState, InjuryStatus, PainLocation, canonicalize
+from models.exercise_catalog import lookup_key, resolve_name
 
 from .init import get_duckdb
 
@@ -94,22 +96,36 @@ def seed_injury(location: str, status: str, severity: int,
     return InjurySeedResult(injury=stored, needs_review=sorted(set(review + alt_review)))
 
 
-def contraindication_hits(canonical_name: str) -> list[tuple[str, str, list[str]]]:
-    """Non-resolved injury rows whose contraindicated_exercises contain the
-    name — matched case/whitespace-insensitively, so a ban stored as the user
-    said it ("skull crusher") still blocks the canonical query ("Skull
-    Crusher"). The safety gate's only sanctioned read of injury_status."""
-    return get_duckdb().execute(
+def contraindication_hits(names: Iterable[str]) -> list[tuple[str, str, list[str]]]:
+    """Non-resolved injury rows (newest first) that ban any of `names`.
+
+    The safety gate's only sanctioned read of injury_status. A stored ban
+    entry matches if its own text OR its current canonical identity equals one
+    of `names`, case/whitespace-insensitively — so a ban stored as the user
+    said it ("skull crusher"), stored verbatim before its name entered the
+    catalog ("Pec Deck"), or stored under a pre-split canonical name all keep
+    blocking. `names` comes from exercise_catalog.ban_match_names().
+    """
+    wanted = {lookup_key(n) for n in names}
+    rows = get_duckdb().execute(
         """
-        SELECT location, status, safe_alternatives
+        SELECT location, status, contraindicated_exercises, safe_alternatives
         FROM injury_status
         WHERE status <> 'resolved'
-          AND list_contains(
-                list_transform(contraindicated_exercises, s -> trim(lower(s))),
-                trim(lower(?)))
-        """,
-        [canonical_name],
+        ORDER BY updated_at DESC
+        """
     ).fetchall()
+    hits = []
+    for location, status, contra, alts in rows:
+        for entry in contra or []:
+            keys = {lookup_key(entry)}
+            canon = resolve_name(entry)
+            if canon:
+                keys.add(lookup_key(canon))
+            if keys & wanted:
+                hits.append((location, status, list(alts or [])))
+                break
+    return hits
 
 
 def tendon_summary() -> dict[str, Any]:

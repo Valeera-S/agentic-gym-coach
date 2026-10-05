@@ -24,9 +24,11 @@ def test_empty_injury_table_is_safe():
 
 def test_contraindicated_exercise_is_unsafe_with_alternatives():
     _seed_injury(contra=["Skull Crusher"], alts=["Tricep Pushdown"])
-    r = check_exercise_safety("Dumbbell Skull Crusher")  # alias -> Skull Crusher
+    # a ban stored under the pre-split name "Skull Crusher" still covers the
+    # dumbbell variant, which is now its own identity
+    r = check_exercise_safety("Dumbbell Skull Crusher")
     assert r.safe is False
-    assert r.exercise == "Skull Crusher"
+    assert r.exercise == "Dumbbell Skull Crusher"
     assert "Tricep Pushdown" in r.alternatives
 
 
@@ -55,5 +57,5 @@ def test_lowercase_alias_still_blocked():
     _seed_injury(contra=["Skull Crusher"], alts=["Tricep Pushdown"])
     r = check_exercise_safety("dumbbell skull crusher")
     assert r.safe is False
-    assert r.exercise == "Skull Crusher"
+    assert r.exercise == "Dumbbell Skull Crusher"
     assert "Tricep Pushdown" in r.alternatives

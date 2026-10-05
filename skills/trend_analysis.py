@@ -5,7 +5,12 @@ Pyramid: Training ch03): count SETS in an intensity zone, never volume-load
 (sets×reps×load distorts — 3×25×100 shows 78% more "volume" than 3×10×140
 for equal hypertrophy). Rules:
   - primary AND secondary muscle contributions count 1:1 (secondary map:
-    models.exercise_catalog.SECONDARY_OVERLAP, Helms ch03 overlap table)
+    models.exercise_catalog.SECONDARY_OVERLAP, derived from the ch03 chart);
+    each set credits each muscle AT MOST ONCE, even when the stored primary
+    is also one of the identity's derived secondaries
+  - stored exercise names are resolved through the catalog first, so a row
+    stored under a name that is now an alias (or a pre-split legacy name)
+    still credits its identity's muscles
   - form_quality < 3 discounts a set 50% (SPEC §1.3)
   - bodyweight/unloaded sets are hard sets (count 1.0 each); tonnage is
     reported in `detail` for reference only, as total external load:
@@ -36,7 +41,7 @@ from datetime import date, timedelta
 import polars as pl
 
 from models import MuscleGroup, TrendDirection, TrendReport
-from models.exercise_catalog import SECONDARY_OVERLAP, secondary_exercises
+from models.exercise_catalog import credited_muscles, exercises_crediting, resolve_name
 
 from .init import get_duckdb
 from .metrics import epley_expr, qualifies_for_est_1rm
@@ -73,6 +78,13 @@ def _with_form_mult(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def with_identity(df: pl.DataFrame) -> pl.DataFrame:
+    """Add `identity`: each stored name resolved to its catalog identity
+    (unknown names stay as stored)."""
+    mapping = {n: resolve_name(n) or n for n in df["name"].unique().to_list() if n is not None}
+    return df.with_columns(pl.col("name").replace(mapping).alias("identity"))
+
+
 def hard_sets_by_muscle(start: date, end: date) -> dict[str, float]:
     """Effective hard sets per muscle group in [start, end], overlap-inclusive.
 
@@ -84,8 +96,7 @@ def hard_sets_by_muscle(start: date, end: date) -> dict[str, float]:
     df = _with_form_mult(df)
     out: dict[str, float] = {}
     for name, mg, sets, mult in df.select("name", "mg", "sets", "form_mult").iter_rows():
-        credited = [mg] + [m.value for m in SECONDARY_OVERLAP.get(name, [])]
-        for m in credited:
+        for m in credited_muscles(name, mg):
             out[m] = out.get(m, 0.0) + (sets or 0) * mult
     return {k: float(v) for k, v in out.items()}
 
@@ -98,9 +109,9 @@ def get_specialization_trend(
     start = anchor - timedelta(days=window_days)
     df = _fetch_entries(start, anchor)
 
-    overlap_names = set(secondary_exercises(muscle))
-    df = df.filter(
-        (pl.col("mg") == muscle.value) | pl.col("name").is_in(list(overlap_names))
+    crediting = list(exercises_crediting(muscle))
+    df = with_identity(df).filter(
+        (pl.col("mg") == muscle.value) | pl.col("identity").is_in(crediting)
     )
 
     if df.height == 0:
@@ -112,8 +123,11 @@ def get_specialization_trend(
         )
 
     df = _with_form_mult(df)
+    # credited other than through the row's stored primary (a row whose
+    # stored primary IS the muscle is a primary credit, never also an overlap)
     df = df.with_columns(
-        pl.col("name").is_in(list(overlap_names)).alias("is_overlap"),
+        ((pl.col("mg") != muscle.value) & pl.col("identity").is_in(crediting))
+        .fill_null(False).alias("is_overlap"),
     )
 
     # --- hard sets (primary metric) ---------------------------------------

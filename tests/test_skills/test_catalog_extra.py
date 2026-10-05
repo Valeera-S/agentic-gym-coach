@@ -13,14 +13,15 @@ def test_exact_canonical_name_round_trips():
 
 
 def test_alias_hit_maps_to_canonical():
-    assert canonicalize("Overhead Press") == ("Shoulder Press", MuscleGroup.side_delt, False)
+    # "Overhead Press" names the barbell press; vertical push primary = front_delt (ch03)
+    assert canonicalize("Overhead Press") == ("Barbell Overhead Press", MuscleGroup.front_delt, False)
 
 
 def test_alias_hits_are_case_insensitive():
     # casing must not decide whether a catalog name maps: an unmapped name
     # keeps its raw spelling, which the safety gate then fails to match
     for raw in ("overhead press", "OVERHEAD PRESS", "  Overhead Press  "):
-        assert canonicalize(raw) == ("Shoulder Press", MuscleGroup.side_delt, False)
+        assert canonicalize(raw) == ("Barbell Overhead Press", MuscleGroup.front_delt, False)
 
 
 def test_case_variant_keeps_its_secondary_overlap():
@@ -28,7 +29,8 @@ def test_case_variant_keeps_its_secondary_overlap():
     # no secondaries and under-counted triceps/side_delt hard sets
     name, _mg, review = canonicalize("incline bench press")
     assert (name, review) == ("Incline Bench Press", False)
-    assert SECONDARY_OVERLAP[name] == [MuscleGroup.triceps, MuscleGroup.side_delt]
+    assert set(SECONDARY_OVERLAP[name]) == {MuscleGroup.front_delt, MuscleGroup.triceps,
+                                            MuscleGroup.side_delt}
 
 
 def test_keyword_fallback_returns_raw_name_with_review():
@@ -81,18 +83,20 @@ def test_flat_bench_and_fly_are_not_core():
         assert review is False, f"{raw} still needs review"
 
 
-def test_flat_bench_credits_triceps_only():
-    # ch03 puts middle delts on the INCLINE case, not on flat bench
-    assert SECONDARY_OVERLAP["Bench Press"] == [MuscleGroup.triceps]
-    assert SECONDARY_OVERLAP["Incline Bench Press"] == [
-        MuscleGroup.triceps, MuscleGroup.side_delt,
-    ]
+def test_flat_bench_credits_front_delt_and_triceps_not_side_delt():
+    # ch03 horizontal push: chest + anterior delts primary, triceps secondary;
+    # middle delts only on the INCLINE case
+    for flat in ("Bench Press", "Barbell Bench Press", "Dumbbell Bench Press"):
+        assert set(SECONDARY_OVERLAP[flat]) == {MuscleGroup.front_delt, MuscleGroup.triceps}
+    assert set(SECONDARY_OVERLAP["Incline Bench Press"]) == {
+        MuscleGroup.front_delt, MuscleGroup.triceps, MuscleGroup.side_delt,
+    }
 
 
-def test_fly_claims_no_secondary():
-    # the chart's secondary for Fly is "Anterior delts", which MuscleGroup
-    # cannot express; borrowing side_delt would invent a citation
-    assert SECONDARY_OVERLAP["Fly"] == []
+def test_fly_credits_front_delt_only():
+    # ch03 fly: chest primary, anterior delts secondary — never side_delt
+    for fly in ("Fly", "Dumbbell Fly", "Cable Fly", "Machine Fly"):
+        assert SECONDARY_OVERLAP[fly] == [MuscleGroup.front_delt]
 
 
 def test_lat_pulldown_matches_pull_up_overlap():
