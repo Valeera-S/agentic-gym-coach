@@ -1,8 +1,8 @@
 """metrics — shared training math (one definition per doctrine constant).
 
 Single home of the Epley est-1RM doctrine (Training ch04): estimates come
-from reps <= EPLEY_MAX_REPS sets only ("~5RM or heavier"); heavier-rep sets
-get the uncapped formula only as reference detail (`detail.epley_all_reps`).
+from reps <= EPLEY_MAX_REPS sets only ("~5RM or heavier"); higher-rep sets
+produce no estimate at all, not even as reference detail.
 
 Used by trend_analysis and snapshot. Editing the formula or the cap here
 changes every consumer at once — coach_trend and coach_snapshot can never

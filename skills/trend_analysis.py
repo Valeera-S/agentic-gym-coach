@@ -12,8 +12,9 @@ for equal hypertrophy). Rules:
 
 est_1rm_kg: Epley over sets with reps <= 6 only ("estimate 1RM only from
 ~5RM-or-heavier performances", ch04). Formula and cap live in skills/metrics.py
-— the single definition shared with snapshot. The uncapped Epley max is kept
-in `detail.epley_all_reps`.
+— the single definition shared with snapshot. No uncapped estimate is reported
+anywhere: Epley at 12+ reps is badly off, and a number shown beside the
+correctly-null est_1rm_kg would read as usable.
 
 trend_direction: est-1RM trend across window halves when qualifying heavy
 sets exist (±2%), else hard-set totals (strict compare). `stalled` = plateau
@@ -121,11 +122,6 @@ def get_specialization_trend(
 
     qualifies = qualifies_for_est_1rm("weight_kg", "reps")
     est_1rm = per_set.filter(qualifies).select(epley_expr("weight_kg", "reps").max()).item()
-    epley_all = per_set.select(
-        pl.when(pl.col("weight_kg").is_not_null() & pl.col("reps").is_not_null())
-        .then(epley_expr("weight_kg", "reps"))
-        .max()
-    ).item()
     unloaded = int(per_set.filter(pl.col("weight_kg").is_null()).height)
 
     # --- trend across first vs second half of the window (by date) ---------
@@ -178,6 +174,5 @@ def get_specialization_trend(
             "tonnage_kg": round(float(tonnage), 1),
             "unloaded_sets": unloaded,
             "overlap_sets": float(overlap_sets),
-            "epley_all_reps": round(float(epley_all), 1) if epley_all is not None else None,
         },
     )

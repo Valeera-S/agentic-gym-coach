@@ -31,6 +31,32 @@ mcp = MCPServer(name="gym-coach")
 _MAX_DOCTRINE_CHARS = 14_000
 _KNOWLEDGE = ROOT / "docs" / "knowledge"
 
+# Book + edition of each vendored knowledge base, stamped on every doctrine
+# response so a cited number never travels without the edition it came from.
+# Copied from each SKILL.md header (tests/test_doctrine_tool.py checks they
+# agree). The nutrition book is the 2015 first edition while the training book
+# is the current 2nd edition — the caution makes that visible to the Coach.
+_BOOK_SOURCES: dict[str, str] = {
+    "helms-training-pyramid": (
+        "The Muscle & Strength Pyramid: Training, 2nd edition "
+        "(Helms, Morgan & Valdez)"
+    ),
+    "helms-nutrition-pyramid": (
+        "The Muscle & Strength Nutrition Pyramid, 1st edition (v1.0, 2015; "
+        "Helms, Morgan & Valdez). CAUTION: a 2nd edition may revise these "
+        "recommendations — say so when citing its numbers"
+    ),
+}
+# The docstring has always promised these two shorthands; they now resolve.
+_TOPIC_ALIASES = {
+    "training": "helms-training-pyramid/SKILL.md",
+    "nutrition": "helms-nutrition-pyramid/SKILL.md",
+}
+
+
+def _book_source(skill_dir: str) -> str:
+    return _BOOK_SOURCES.get(skill_dir, f"{skill_dir} — edition not recorded")
+
 
 def _run(cmd: str, args: dict) -> dict:
     """Dispatch to the shared handler; preserve the halt-and-report posture
@@ -67,7 +93,7 @@ def coach_safety_check(exercise: str) -> dict:
 
 @mcp.tool()
 def coach_recovery(date: str | None = None) -> dict:
-    """Heuristic 0-100 recovery score for a date (<60 deload, <80 autoregulate, <100 may train, 100 push-ready)."""
+    """Heuristic 0-100 pre-session recovery score for a date (<60 deload, <80 autoregulate, <100 may train, 100 push-ready). Reads only days BEFORE the date — a session already logged that day is excluded (excludes_query_date: true)."""
     return _run("recovery", {"date": date})
 
 
@@ -75,7 +101,7 @@ def coach_recovery(date: str | None = None) -> dict:
 def coach_trend(muscle: str,
                 window_days: int = coach_tools.DEFAULT_TREND_WINDOW_DAYS,
                 end_date: str | None = None) -> dict:
-    """Effective hard sets, avg RPE, est 1RM (≤6-rep sets), trend direction, and stall flag for a muscle group over a window (detail block: tonnage, unloaded/overlap sets, uncapped Epley)."""
+    """Effective hard sets, avg RPE, est 1RM (≤6-rep sets), trend direction, and stall flag for a muscle group over a window (detail block: tonnage, unloaded/overlap sets)."""
     return _run("trend", {"muscle": muscle, "window_days": window_days, "end_date": end_date})
 
 
@@ -148,6 +174,9 @@ def coach_memory_search(query: str | None = None, tags: list[str] | None = None,
 def coach_doctrine(topic: str | None = None) -> str:
     """Procedural disclosure over MCP: list the knowledge routing table, or return a knowledge file's content.
 
+    Every response names the book and edition it comes from; the nutrition book
+    is the 1st edition (2015) and is flagged as possibly revised by its 2nd.
+
     topic: 'index' (default) | 'training' | 'nutrition' | a file path relative
     to docs/knowledge/ (e.g. 'helms-training-pyramid/chapters/ch04-level-3-progression.md').
     """
@@ -156,15 +185,17 @@ def coach_doctrine(topic: str | None = None) -> str:
         for skill_dir in sorted(_KNOWLEDGE.iterdir()):
             if skill_dir.is_dir():
                 lines.append(f"  {skill_dir.name}/ — {skill_dir.name}/SKILL.md (chapter + topic index)")
+                lines.append(f"      book: {_book_source(skill_dir.name)}")
         lines.append("Pass a relative path (e.g. 'helms-training-pyramid/chapters/ch03-...md') to fetch content.")
         return "\n".join(lines)
-    candidate = (_KNOWLEDGE / topic).resolve()
-    if not str(candidate).startswith(str(_KNOWLEDGE)) or not candidate.is_file():
+    candidate = (_KNOWLEDGE / _TOPIC_ALIASES.get(topic, topic)).resolve()
+    if not candidate.is_relative_to(_KNOWLEDGE) or not candidate.is_file():
         return f"error: unknown doctrine topic '{topic}' — call with 'index' first"
     text = candidate.read_text(encoding="utf-8")
     if len(text) > _MAX_DOCTRINE_CHARS:
         text = text[:_MAX_DOCTRINE_CHARS] + "\n...[truncated — read the file directly for the rest]"
-    return text
+    skill_dir = candidate.relative_to(_KNOWLEDGE).parts[0]
+    return f"[Source: {_book_source(skill_dir)}]\n\n{text}"
 
 
 if __name__ == "__main__":

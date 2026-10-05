@@ -45,8 +45,8 @@ def test_est_1rm_only_from_low_rep_sets():
     r = get_specialization_trend(MuscleGroup.side_delt, window_days=28)
     # reps 9 > 6 cap -> no qualifying sets -> est_1rm None (never a bad estimate)
     assert r.est_1rm_kg is None
-    # uncapped Epley survives as reference: 10*(1+9/30) = 13.0
-    assert r.detail["epley_all_reps"] == pytest.approx(13.0, abs=0.1)
+    # and no uncapped Epley leaks out beside it as a plausible-looking number
+    assert "epley_all_reps" not in r.detail
     _side_delt(today - timedelta(days=2), [10.0], reps=5)
     r = get_specialization_trend(MuscleGroup.side_delt, window_days=28)
     # Epley 10*(1+5/30) = 11.7 from the single qualifying set
@@ -158,6 +158,10 @@ def test_perf_under_50ms_on_synthetic_set():
         "INSERT INTO sessions (date, phase, pre_recovery_score, exercises, post_feedback) VALUES (?, ?, ?, ?, ?)",
         rows,
     )
+    # Warm up first: the first query in a process pays one-off Polars/Arrow
+    # initialisation (~200ms measured vs ~15ms steady state), which is not the
+    # query cost this guard exists to bound.
+    get_specialization_trend(MuscleGroup.side_delt, window_days=28)
     t0 = time.perf_counter()
     get_specialization_trend(MuscleGroup.side_delt, window_days=28)
     dt_ms = (time.perf_counter() - t0) * 1000

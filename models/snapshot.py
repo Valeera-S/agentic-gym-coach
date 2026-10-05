@@ -29,12 +29,20 @@ class TrendReport(BaseModel):
 
 
 class RecoveryScore(BaseModel):
-    """Return of recovery.compute_recovery_score()."""
+    """Return of recovery.compute_recovery_score().
+
+    A PRE-session score: every component reads days strictly before `date`.
+    A session logged on `date` itself is never counted (counting it would make
+    the score circular), so `days_since_last_session` / `sets_7d` look "one
+    session behind" right after logging today's workout. `excludes_query_date`
+    states that in the output itself.
+    """
 
     date: date
     score: int = Field(ge=0, le=100)
     adjustment: str = ""  # e.g. "deload recommended", "may push"
     components: dict[str, Any] = Field(default_factory=dict)
+    excludes_query_date: bool = True  # always True — see class docstring
 
 
 class SessionGap(BaseModel):

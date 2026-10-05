@@ -65,3 +65,16 @@ def test_well_rested_after_two_rest_days():
     # 2 rest days before target → bonus; single light session not enough to heavily penalize
     assert r.components["trained_yesterday"] is False
     assert r.components["trained_day_before"] is False
+
+def test_query_date_session_is_excluded_and_output_says_so():
+    """Pre-session semantics: a session logged ON the query date is not an
+    input (it would make the score circular), and the output declares it."""
+    _log_on(_D - timedelta(days=2), sets=4)
+    before = compute_recovery_score(_D)
+    _log_on(_D, sets=20)  # today's workout, logged before asking
+    after = compute_recovery_score(_D)
+    assert after.excludes_query_date is True
+    assert after.model_dump(mode="json")["excludes_query_date"] is True
+    assert after.score == before.score
+    assert after.components == before.components
+    assert after.components["days_since_last_session"] == 2

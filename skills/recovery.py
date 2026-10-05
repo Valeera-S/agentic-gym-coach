@@ -10,6 +10,10 @@ The composite is a transparent heuristic — fatigue = recent sets, pain is a
 big negative, consecutive days add fatigue, rest days give a small bonus.
 Re-tune against real outcomes once enough history exists.
 
+Pre-session semantics: every component reads days strictly BEFORE the query
+date — a session already logged on that date is excluded (counting it would
+make the score circular). The output says so (`excludes_query_date: true`).
+
 Contract: <30ms. Score 0-100. <60 ⇒ orchestrator flags autoregulation required.
 """
 
