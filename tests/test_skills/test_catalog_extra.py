@@ -77,7 +77,7 @@ def test_flat_bench_and_fly_are_not_core():
     # (key, core, True) fallback — flat bench was logged as core
     for raw in ("Bench Press", "Flat Bench", "Chest Press", "Fly", "Pec Deck"):
         name, mg, review = canonicalize(raw)
-        assert mg is MuscleGroup.upper_chest, f"{raw} -> {mg}"
+        assert mg is MuscleGroup.chest, f"{raw} -> {mg}"
         assert review is False, f"{raw} still needs review"
 
 

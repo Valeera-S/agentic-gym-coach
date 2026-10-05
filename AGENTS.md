@@ -42,7 +42,7 @@ No lint/typecheck config exists in this repo — don't invoke tools that aren't 
 ## Modularity & maintainability
 - **Skills are standalone, deterministic Python modules** in `skills/`. Each returns Pydantic models (not dicts). No LLM logic lives here — reasoning happens in the orchestrator/agent.
 - Adding/changing a skill → add a module + `tests/test_skills/test_<name>.py`.
-- `models/` holds all Pydantic schemas. `models/enums.py` is the controlled vocabulary for DB-stored vocabularies (profile-local enums live beside their models in `models/profile.py`) — DB columns store VARCHAR, Pydantic enforces (extending a vocabulary needs no migration).
+- `models/` holds all Pydantic schemas. `models/enums.py` is the controlled vocabulary for DB-stored vocabularies (profile-local enums live beside their models in `models/profile.py`) — DB columns store VARCHAR (including the per-exercise `muscle_group` inside the `sessions.exercises` struct, since migration 0003), Pydantic enforces (extending a vocabulary needs no migration).
 - **Adding a coach tool touches three places:** a handler in `coach_tools.py` (DISPATCH), an MCP wrapper in `mcp_server.py`, and a line in `docs/COACH_PROMPT.md`.
 - Schema changes go through Alembic migrations only — never hand-edit `data/gym_coach.duckdb`.
 

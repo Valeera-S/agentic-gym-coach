@@ -111,6 +111,12 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        # Wrap the rendered script in BEGIN/COMMIT. A --sql script may be run
+        # by a tool that reports an error and carries on (the DuckDB CLI does
+        # so without -bail); a migration's guard statement must then abort the
+        # whole script, version bump included, not just itself. Online runs
+        # are already transactional per migration.
+        transactional_ddl=True,
     )
 
     with context.begin_transaction():

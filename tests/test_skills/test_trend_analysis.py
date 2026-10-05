@@ -134,7 +134,8 @@ def test_hard_sets_by_muscle_overlap_inclusive():
     assert vol["biceps"] == pytest.approx(4.0)     # Row secondary
     assert vol["quads"] == pytest.approx(1.5)     # Squat primary, form-discounted
     assert vol["glutes"] == pytest.approx(1.5)     # Squat secondary, form-discounted
-    assert vol["core"] == pytest.approx(1.5)       # Squat secondary, form-discounted
+    assert vol["erectors"] == pytest.approx(1.5)   # Squat secondary, form-discounted
+    assert "core" not in vol                       # core = abs only, no erector credit
 
 
 @pytest.mark.slow

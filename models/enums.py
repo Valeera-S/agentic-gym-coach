@@ -1,8 +1,9 @@
 """Controlled vocabularies — validated at the Pydantic boundary.
 
-v2: the DB stores phase/location as VARCHAR (migration 0002); these enums are
-the single source of the allowed vocabulary. Extending a vocabulary no longer
-requires a migration — add a value here and the validation layer enforces it.
+v2: the DB stores phase/location as VARCHAR (migration 0002) and the
+per-exercise muscle_group as VARCHAR too (migration 0003); these enums are the
+single source of the allowed vocabulary. Extending a vocabulary requires no
+migration — add a value here and the validation layer enforces it.
 
 Phase names follow Helms' block-periodization vocabulary (Muscle & Strength
 Pyramid: Training ch04) so program state maps 1:1 onto the doctrine.
@@ -12,19 +13,50 @@ from enum import Enum
 
 
 class MuscleGroup(str, Enum):
-    side_delt = "side_delt"
-    rear_delt = "rear_delt"
-    upper_chest = "upper_chest"
-    mid_back = "mid_back"
+    """Muscles that hard sets are credited to.
+
+    Aligned with the Training ch03 counting chart's own vocabulary (the chart
+    models/doctrine_ch03.py transcribes; BOOK_TO_REPO there is the bridge).
+    Repo names that differ from the book's are noted per member; members the
+    chart does not have are labelled HEURISTIC with the reason.
+    """
+
+    side_delt = "side_delt"    # book: "Middle delts"
+    rear_delt = "rear_delt"    # book: "Rear delts"
+    front_delt = "front_delt"  # book: "Anterior delts" (primary for vertical AND horizontal push)
+    # book: "Chest" — one category; incline vs flat is carried by the exercise
+    # name, never by the muscle. Replaces the former `upper_chest` (see _missing_).
+    chest = "chest"
+    mid_back = "mid_back"      # book: "Scapular retractors"
     lats = "lats"
     biceps = "biceps"
     triceps = "triceps"
     quads = "quads"
-    hamstrings = "hamstrings"
+    hamstrings = "hamstrings"  # book: "Hams"
     glutes = "glutes"
+    erectors = "erectors"      # book: "Erectors" (squat / hip-hinge credit)
+    # HEURISTIC — not a ch03 chart muscle: abdominal work only (crunches, leg
+    # raises). Erector credit is `erectors`, never `core`.
     core = "core"
+    # HEURISTIC — not in the ch03 chart, which has no calf movement pattern;
+    # calf raises fit its "Isolation -> target muscle" row.
     calves = "calves"
+    # HEURISTIC — not in the ch03 chart; kept so a caller can still name it.
+    # No catalog exercise credits it.
     serratus = "serratus"
+    # Sentinel, not a muscle: an exercise the system could not map. Its sets
+    # stay loggable but are credited to no muscle's volume or trend.
+    unclassified = "unclassified"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "MuscleGroup | None":
+        # `upper_chest` was replaced by `chest` (migration 0003 remapped every
+        # stored value). Accepting the old spelling keeps every previously valid
+        # call — log input, trend query, stored profile JSON — working with the
+        # same meaning.
+        if value == "upper_chest":
+            return cls.chest
+        return None
 
 
 class PhaseType(str, Enum):

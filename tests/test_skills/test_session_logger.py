@@ -36,7 +36,7 @@ def test_muscle_group_auto_filled_and_canonical_name_stored():
         "SELECT exercises[1].name, exercises[1].muscle_group FROM sessions"
     ).fetchone()
     assert row[0] == "Incline Bench Press"  # canonical
-    assert row[1] == MuscleGroup.upper_chest.value
+    assert row[1] == MuscleGroup.chest.value
 
 
 def test_anomaly_flags_for_pain_low_form_and_unmapped():

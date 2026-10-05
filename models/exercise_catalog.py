@@ -21,24 +21,23 @@ from .enums import MuscleGroup
 # Each entry: (canonical_name, muscle_group, [aliases], [secondary_muscles])
 _ENTRIES: list[tuple[str, MuscleGroup, list[str], list[MuscleGroup]]] = [
     # Horizontal push — chest primary, triceps/delts secondary (ch03 table)
-    ("Incline Bench Press", MuscleGroup.upper_chest,
+    ("Incline Bench Press", MuscleGroup.chest,
      ["Incline Press", "Machine Incline Press", "Dumbbell Incline Press", "Incline Dumbbell Press"],
      [MuscleGroup.triceps, MuscleGroup.side_delt]),
-    ("Decline Push-Up", MuscleGroup.upper_chest, [],
+    ("Decline Push-Up", MuscleGroup.chest, [],
      [MuscleGroup.triceps, MuscleGroup.side_delt]),
     # ch03 horizontal push: primary "Chest, anterior delts", secondary
-    # "Triceps ..., middle delts (incline)". Neither `chest` nor a front-delt
-    # value exists in MuscleGroup, so `upper_chest` is the nearest available
-    # primary — a KNOWN DEVIATION from the chart, not a citation. Middle delts
+    # "Triceps ..., middle delts (incline)". The missing front_delt credit is a
+    # recorded deviation (models/doctrine_ch03.KNOWN_DEVIATIONS). Middle delts
     # are the incline case per the chart, so flat bench credits triceps only.
-    ("Bench Press", MuscleGroup.upper_chest,
+    ("Bench Press", MuscleGroup.chest,
      ["Barbell Bench Press", "Flat Bench Press", "Flat Bench",
       "Dumbbell Bench Press", "Chest Press", "Machine Chest Press"],
      [MuscleGroup.triceps]),
-    # ch03 fly: primary "Chest", secondary "Anterior delts". Same deviation on
-    # the primary; the secondary has no representable value, so it stays empty
-    # rather than borrowing side_delt, which the chart does not say.
-    ("Fly", MuscleGroup.upper_chest,
+    # ch03 fly: primary "Chest", secondary "Anterior delts". The missing
+    # front_delt credit is a recorded deviation; the secondary never borrows
+    # side_delt, which the chart does not say.
+    ("Fly", MuscleGroup.chest,
      ["Cable Fly", "Dumbbell Fly", "Chest Fly", "Machine Fly", "Pec Deck"], []),
     # Vertical push — delts primary (repo lumps delt heads), triceps secondary
     ("Shoulder Press", MuscleGroup.side_delt,
@@ -69,18 +68,18 @@ _ENTRIES: list[tuple[str, MuscleGroup, list[str], list[MuscleGroup]]] = [
      [MuscleGroup.lats, MuscleGroup.rear_delt, MuscleGroup.biceps]),
     # Arms — isolation, no meaningful secondary
     ("Dip", MuscleGroup.triceps, [],
-     [MuscleGroup.upper_chest, MuscleGroup.side_delt]),
+     [MuscleGroup.chest, MuscleGroup.side_delt]),
     ("Overhead Tricep Extension", MuscleGroup.triceps, [], []),
     ("Tricep Pushdown", MuscleGroup.triceps, [], []),
     ("Skull Crusher", MuscleGroup.triceps, ["Dumbbell Skull Crusher"], []),
     ("Hammer Curl", MuscleGroup.biceps, [], []),
     ("Bay Curl", MuscleGroup.biceps, [], []),
     ("Dumbbell Curl", MuscleGroup.biceps, ["Curl"], []),
-    # Squat pattern — quads primary, glutes + erectors (≈core) secondary
+    # Squat pattern — quads primary, glutes + erectors secondary
     ("Squat", MuscleGroup.quads, ["Bulgarian Split Squat", "Split Squat"],
-     [MuscleGroup.glutes, MuscleGroup.core]),
+     [MuscleGroup.glutes, MuscleGroup.erectors]),
     ("Leg Extension", MuscleGroup.quads, [], []),
-    ("Leg Press", MuscleGroup.quads, [], [MuscleGroup.glutes, MuscleGroup.core]),
+    ("Leg Press", MuscleGroup.quads, [], [MuscleGroup.glutes, MuscleGroup.erectors]),
     # Hinge — hamstrings primary, glutes secondary
     ("Romanian Deadlift", MuscleGroup.hamstrings, [], [MuscleGroup.glutes]),
     ("Leg Curl", MuscleGroup.hamstrings, ["Single-Leg Curl"], []),
@@ -133,13 +132,13 @@ def secondary_exercises(muscle: MuscleGroup) -> list[str]:
 # as new exercises appear. An exercise whose only keyword is ambiguous
 # (e.g. "Press" alone) maps to best-guess and flags needs_review=True.
 _KEYWORD_RULES: list[tuple[str, MuscleGroup]] = [
-    ("incline", MuscleGroup.upper_chest),
+    ("incline", MuscleGroup.chest),
     ("lateral", MuscleGroup.side_delt),
     ("rear delt", MuscleGroup.rear_delt),
     ("reverse fly", MuscleGroup.rear_delt),
     ("face pull", MuscleGroup.rear_delt),  # before "pull", which would win otherwise
-    ("fly", MuscleGroup.upper_chest),      # after "reverse fly" for the same reason
-    ("bench", MuscleGroup.upper_chest),
+    ("fly", MuscleGroup.chest),      # after "reverse fly" for the same reason
+    ("bench", MuscleGroup.chest),
     ("row", MuscleGroup.mid_back),
     ("pull", MuscleGroup.lats),
     ("curl", MuscleGroup.biceps),
@@ -160,8 +159,8 @@ _KEYWORD_RULES: list[tuple[str, MuscleGroup]] = [
     ("leg raise", MuscleGroup.core),
     ("shoulder press", MuscleGroup.side_delt),
     ("overhead press", MuscleGroup.side_delt),
-    ("push-up", MuscleGroup.upper_chest),
-    ("pushup", MuscleGroup.upper_chest),
+    ("push-up", MuscleGroup.chest),
+    ("pushup", MuscleGroup.chest),
 ]
 
 

@@ -13,8 +13,8 @@ Precedence: (1) deterministic safety layer, (2) vendored skills (doctrine), (3) 
 2. DATA ARCHITECTURE
 Local-first embedded stack: DuckDB (data/gym_coach.duckdb), Polars (never Pandas), Pydantic V2 at every boundary, Alembic migrations (never hand-edit schema).
 
-2.1 Tables (post migration 0002)
-- sessions — date, phase VARCHAR (vocab: PhaseType enum in models/enums.py), pre_recovery_score, exercises STRUCT(name, muscle_group ENUM, sets, reps[], rpe[], weight_kg[], tempo, form_quality, pain_flag, notes)[], post_feedback
+2.1 Tables (post migration 0003)
+- sessions — date, phase VARCHAR (vocab: PhaseType enum in models/enums.py), pre_recovery_score, exercises STRUCT(name, muscle_group VARCHAR (vocab: MuscleGroup), sets, reps FLOAT[], rpe FLOAT[], weight_kg DOUBLE[], tempo, form_quality, pain_flag, notes, raw_name, muscle_source, load_type, entered_weight DOUBLE[], entered_unit)[], post_feedback, kind VARCHAR NOT NULL DEFAULT 'training' ('training' | 'habit'). The per-exercise fields after `notes` were added by 0003 and are NULL on pre-0003 rows ("unknown").
 - injury_status — location VARCHAR (vocab: PainLocation enum), status, severity 0–10, contraindicated_exercises[], safe_alternatives[]
 - phase_snapshots — snapshot_date PK, phase VARCHAR, body_weight_kg, waist_cm, specialization_lifts JSON, tendon_status_summary JSON, key_insight, next_phase_adjustment
 - decision_log — event_type, trigger_signal, reasoning_chain, alternative_rejected, future_validation_tag (audit trail)
@@ -22,7 +22,7 @@ Local-first embedded stack: DuckDB (data/gym_coach.duckdb), Polars (never Pandas
 - memory_notes — id UUID PK, created_at, kind, text, tags[] (Tier 3; manual-save only; substring/tag search)
 
 2.2 Vocabulary policy
-DB stores phase/location as VARCHAR; models/enums.py is the controlled vocabulary, enforced by Pydantic at the boundary. Extending a vocabulary = edit the enum, no migration. (Supersedes v1 SPEC §1.2 "enforce via SQL ENUM".)
+DB stores phase/location and the per-exercise muscle_group as VARCHAR (muscle_group since 0003, which also remapped the retired `upper_chest` to `chest`); models/enums.py is the controlled vocabulary, enforced by Pydantic at the boundary. Extending a vocabulary = edit the enum, no migration. (Supersedes v1 SPEC §1.2 "enforce via SQL ENUM".)
 
 2.3 Volume semantics (Training ch03)
 Volume currency = effective hard sets per muscle per week: sets × form_mult (form_quality < 3 ⇒ 0.5), primary + secondary contributions 1:1 (models/exercise_catalog.SECONDARY_OVERLAP), bodyweight sets count. Tonnage is reference detail only. est_1rm from reps ≤ 6 sets only ("~5RM or heavier", ch04).

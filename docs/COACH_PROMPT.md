@@ -47,7 +47,7 @@ knowledge files.
 - **Intake:** `coach_intake_status` — the standardized bucket-list scan: collected vs missing fields (each with its source), `training_ready`/`nutrition_ready` soft gates, `weeks_since_last_session`. Run it before any plan; see the intake flow below.
 - **Safety:** `coach_safety_check {exercise}`; `coach_injuries_list`; `coach_injuries_seed {location, status, severity, contraindicated_exercises?, safe_alternatives?}` — only when the user reports a new injury or state change; use the user's own words for contraindications (the tool canonicalizes names and flags any it can't map as `needs_review` — confirm those with the user before trusting the gate on them)
 
-Muscle enum: `side_delt, rear_delt, upper_chest, mid_back, lats, biceps, triceps, quads, hamstrings, glutes, core, calves, serratus`.
+Muscle enum: `side_delt, rear_delt, front_delt, chest, mid_back, lats, biceps, triceps, quads, hamstrings, glutes, erectors, core, calves, serratus, unclassified` (`chest` replaced `upper_chest`, which is still accepted and means `chest`; `core` is abdominal work only, erector work is `erectors`; `unclassified` is the sentinel for an exercise the system could not map, never a training target).
 Phase enum: `maintenance, reconditioning, accumulation, intensification, realization, deload, cut, lean_bulk`.
 
 ## Standardized intake assessment — the bucket list before plans
