@@ -15,6 +15,7 @@ bash 0.5s budget per call. Skills are pure deterministic code.
 """
 from __future__ import annotations
 
+import functools
 import json
 import sys
 from datetime import date
@@ -179,7 +180,21 @@ def cmd_memory_search(args: dict):
     return [n.model_dump(mode="json") for n in notes]
 
 
-DISPATCH = {
+def _release_after_call(fn):
+    """Run a handler inside skills.init.connection_scope(): the DuckDB file is
+    open only for the duration of the call, so an idle MCP server (or any
+    long-lived caller) never locks other processes out of the database."""
+    @functools.wraps(fn)
+    def run(args: dict):
+        from skills.init import connection_scope
+        with connection_scope():
+            return fn(args)
+    return run
+
+
+# Both surfaces (CLI main() and mcp_server._run) dispatch through this table,
+# so wrapping here covers every tool call on either surface.
+_HANDLERS = {
     "log_session": cmd_log_session,
     "safety_check": cmd_safety_check,
     "recovery": cmd_recovery,
@@ -194,6 +209,7 @@ DISPATCH = {
     "memory_save": cmd_memory_save,
     "memory_search": cmd_memory_search,
 }
+DISPATCH = {name: _release_after_call(fn) for name, fn in _HANDLERS.items()}
 
 
 def main() -> None:
