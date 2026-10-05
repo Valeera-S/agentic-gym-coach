@@ -16,11 +16,15 @@ alembic upgrade head        # bootstrap data/gym_coach.duckdb
 
 ## MCP-capable runtimes (Claude Code, ZCode, Cursor, Codex CLI, Continue, …)
 
-`mcp_server.py` exposes all 12 coach tools + `coach_doctrine` (procedural
-disclosure over MCP) over stdio. All runtimes share this one server.
+`mcp_server.py` exposes all 16 coach tools + `coach_doctrine` (procedural
+disclosure over MCP) over stdio. All runtimes share this one server. Each tool
+call opens the DuckDB file and releases it on return, so an idle server never
+blocks `alembic`, the CLI or a second runtime.
 
 **Claude Code** — repo-root `.mcp.json` is picked up automatically (or
-`claude mcp add gym-coach -- .venv/bin/python mcp_server.py`). For the
+`claude mcp add gym-coach -- .venv/bin/python mcp_server.py`). On Windows
+the committed POSIX path does not exist: register a local-scope override,
+`claude mcp add gym-coach --scope local -- .venv\Scripts\python.exe mcp_server.py`. For the
 persona, create a subagent (`.claude/agents/coach.md`) whose body is
 `docs/COACH_PROMPT.md` — or register it in `scripts/sync_adapters.py`'s
 `ADAPTERS` list and run the script to render it automatically.

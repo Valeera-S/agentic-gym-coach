@@ -170,4 +170,4 @@ def test_perf_under_50ms_on_synthetic_set():
     t0 = time.perf_counter()
     get_specialization_trend(MuscleGroup.side_delt, window_days=28)
     dt_ms = (time.perf_counter() - t0) * 1000
-    assert dt_ms < 100, f"trend ran in {dt_ms:.1f}ms"  # ponytail: <100ms guard (SPEC <50 on 10K)
+    assert dt_ms < 100, f"trend ran in {dt_ms:.1f}ms"  # ponytail: <100ms guard (SPEC: <100ms on 10K rows)

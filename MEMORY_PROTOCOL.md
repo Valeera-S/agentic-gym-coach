@@ -123,6 +123,7 @@ Memory Tier   Auto-Write Allowed?   Approval Required?   Validation Layer
 Tier 1 (Working)   Yes (session-scoped)   No   Pydantic runtime validation
 
 Tier 2 (Episodic)   Yes (structured logs)   No   Schema constraints + unit tests
+Tier 2 (corrections: coach_session_amend / coach_session_delete)   No   YES (read back via coach_session_detail, explicit user yes)   Same validation as a fresh log + full pre-change row in decision_log.payload
 
 Tier 2 (Summaries)   Yes (auto-generated)   No   Compression skill unit tests
 
@@ -139,7 +140,7 @@ Orphan Detection: Weekly scan for subjective notes without linked session data. 
 If database corruption or missing data detected:
 Halt all planning operations
 Notify user with specific error + affected date range
-Offer recovery options: restore from backup / rebuild from raw exports / manual re-entry
+Offer recovery options: restore from backup / rebuild from raw exports / manual re-entry / restore an amended or deleted session from its audit entry (skills/sessions.py::restore_snapshot — coding agent)
 NEVER silently fabricate or interpolate missing physiological data
 Log incident in decision audit trail as memory_integrity_event
 

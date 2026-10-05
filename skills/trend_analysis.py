@@ -43,7 +43,8 @@ Epley is used only as a relative comparison inside one identity and is never
 reported as a 1RM). Bodyweight exercises get no load step — their true load
 includes a body mass the system does not have per session — so they compare
 by dominance only (more added load at >= the reps, or more reps). Only exercises for
-which the muscle is a chart PRIMARY decide its direction (overlap credit counts
+which the muscle is a chart PRIMARY (for an unknown name: its stored muscle)
+decide its direction (overlap credit counts
 toward volume, never toward progression). Per muscle, whichever of up / down
 carries more effective sets wins; equal (or all flat) -> plateau; nothing
 comparable across both halves -> unknown. A set-count change alone is a volume

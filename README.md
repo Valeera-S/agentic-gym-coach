@@ -37,8 +37,15 @@ You:  Remember I hate barbell rows.              → long-term memory (manual on
 - **It verifies.** `coach_safety_check` cross-references `injury_status`
   before any exercise suggestion. Deterministic — no negotiation.
 - **It measures honestly.** Volume = effective hard sets (form-discounted,
-  overlap-inclusive). 1RM estimates only from ~5RM-or-heavier sets. Missing
-  data is stated, never fabricated.
+  overlap-inclusive, with every credited muscle derived from the book's
+  counting chart). 1RM estimates only from ~5RM-or-heavier sets. Progress is
+  judged per exercise (more load or more reps), not by set counts. Missing
+  data is stated, never fabricated; an unknown exercise is flagged, never
+  dumped into a real muscle.
+- **It keeps your numbers.** Log in pounds or kilos (`weight` + `unit`);
+  read any session back exactly as entered (`coach_session_detail`), and
+  correct or delete a wrong entry (`coach_session_amend` /
+  `coach_session_delete`, both audited and restorable).
 - **It works everywhere.** One Python core; every MCP-capable runtime
   (Claude Code, ZCode, Cursor, Codex CLI, …) attaches the same
   `mcp_server.py`.
@@ -60,12 +67,24 @@ python scripts/ingest_log.py --reset   # optional: import historical log.md
 - **Any MCP runtime:** point it at `.venv/bin/python mcp_server.py` and use
   [docs/COACH_PROMPT.md](docs/COACH_PROMPT.md) as the agent's system prompt —
   see [docs/adapters.md](docs/adapters.md) for per-runtime wiring.
+- **Windows:** the committed `.mcp.json` uses the POSIX venv path
+  (`.venv/bin/python`), which does not exist on Windows. Register a
+  local-scope server instead — it overrides the project file for you only:
+
+  ```powershell
+  claude mcp add gym-coach --scope local -- .venv\Scripts\python.exe mcp_server.py
+  ```
+
+  and use `.venv\Scripts\python.exe` wherever the docs say `.venv/bin/python`.
+- **Migrations:** after updating, run `alembic upgrade head` (it is safe while
+  the MCP server sits idle — the server releases the DB between calls), then
+  restart the runtime so the MCP server loads the new code.
 
 ## Running tests
 
 ```bash
-python -m pytest -q          # 204 tests, ~3s
-python -m pytest -m slow -q  # perf guard on 10K rows
+python -m pytest -q          # 646 tests
+python -m pytest -m slow -q  # 3 perf guards on 10K-row synthetic sets
 ```
 
 ## Design principles

@@ -1,7 +1,7 @@
 """sessions — read back, amend and delete logged sessions.
 
-The single owner of whole-session reads and of corrections (log_session in
-skills/session_logger.py is the only other writer).
+The single owner of whole-session reads and of corrections (the other writers are
+log_session in skills/session_logger.py and scripts/ingest_log.py --reset).
 
 `coach_sessions` lists sessions leanly (Tier-1 friendly); this skill returns
 ONE session — or every session on one date — exactly as logged: each exercise
@@ -17,7 +17,10 @@ weight was read (`load_type`) and the weight + unit as entered.
     catalog identity today (those rows were guessed back then)
 
 Unknown id or date -> ValueError (the tool contract's invalid_input).
-Contract: deterministic, read-only.
+Contract: deterministic. Reads are read-only; amend_session / delete_session write the
+sessions row and its decision_log audit entry in one transaction. The restore_snapshot
+recovery helper rewrites the sessions row in one transaction and writes no audit entry
+of its own.
 """
 
 from __future__ import annotations

@@ -67,3 +67,45 @@ The session-scoped state snapshot injected at session start (~3K-token hard
 cap). Its `onboarding_required` flag is the legacy name for "profile is null"
 — the intake scan then reports everything missing.
 _Avoid_: context window, chat history
+
+**Exercise identity**:
+What a canonical exercise name means: one implement or machine doing one
+movement. A different implement is a different identity ("Dumbbell Fly" ≠
+"Cable Fly"), because their loads are not comparable; aliases are only true
+synonyms. Muscles come from the identity's ch03 movement pattern, never from
+a hand-written list.
+_Avoid_: exercise family, counting bucket
+
+**Generic identity**:
+A name that does not say the implement ("Bench Press", "Fly", "Row"). Valid
+input and the name older rows were stored under, so history keeps counting;
+it carries no load_type default and its loads are not compared with a
+specific implement's. The safety gate treats it as covering all its variants.
+_Avoid_: legacy name (only some generics are legacy)
+
+**muscle_source**:
+How a logged exercise's muscle was decided: `catalog`, `keyword` (a guess),
+`caller` (set by the caller), or `unclassified` (no muscle). `needs_review`
+is derived from it (and the exercise name) on read.
+_Avoid_: confidence
+
+**Unclassified**:
+The sentinel muscle for an exercise the system could not map. Its sets stay
+logged but count toward no muscle's volume or trend until the entry is
+corrected.
+_Avoid_: other, core (the old silent default)
+
+**Habit session**:
+A session with `kind = habit`: a standing daily item done outside training
+(e.g. daily bodyweight squats). Counts toward volume; excluded from
+recovery's training-load inputs, the session gap, deload block state and the
+phase fallback (pain flagged during it still counts toward recovery).
+_Avoid_: mini-session, active recovery
+
+**Load type**:
+How a logged weight was read off the implement: per_hand, per_side, total,
+machine_stack or bodyweight. `weight_kg` stays the implement reading; tonnage
+counts per_hand / per_side twice. NULL (unknown) on pre-0003 rows, and
+whenever none was given for an identity without a default (every generic
+name, every unknown name).
+_Avoid_: weight type

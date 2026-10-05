@@ -1,11 +1,13 @@
-"""The ch03 counting chart, transcribed verbatim — conformance spec for the catalog.
+"""The ch03 counting chart, transcribed verbatim — the source of the catalog's muscles.
 
-`exercise_catalog.py` claims its `SECONDARY_OVERLAP` implements Helms' overlap
-doctrine (Muscle & Strength Pyramid: Training ch03). That claim was added on
-2026-09-09 (`b783ae3`, the commit that vendored the books) to a table written
-on 2026-07-13 (`db2c8f7`), whose original comment labelled its first entry
-`# Upper chest (specialization target)`. The vocabulary was never re-derived
-from the book it now cites.
+History: until v2.4 `exercise_catalog.py` hand-listed its SECONDARY_OVERLAP and
+claimed it implemented Helms' overlap doctrine (Muscle & Strength Pyramid:
+Training ch03) — a claim added on 2026-09-09 (`b783ae3`, the commit that
+vendored the books) to a table written on 2026-07-13 (`db2c8f7`), whose
+original comment labelled its first entry `# Upper chest (specialization
+target)` — without ever re-deriving it from the book. Since v2.4 the
+catalog's muscles are DERIVED from this module (chart_credit), and the
+conformance ratchet below keeps the two from drifting apart again.
 
 This module holds the book side of that comparison so the gap is *generated*
 rather than eyeballed:

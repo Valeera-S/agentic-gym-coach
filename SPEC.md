@@ -13,11 +13,11 @@ Precedence: (1) deterministic safety layer, (2) vendored skills (doctrine), (3) 
 2. DATA ARCHITECTURE
 Local-first embedded stack: DuckDB (data/gym_coach.duckdb), Polars (never Pandas), Pydantic V2 at every boundary, Alembic migrations (never hand-edit schema).
 
-2.1 Tables (post migration 0003)
+2.1 Tables (post migration 0004)
 - sessions — date, phase VARCHAR (vocab: PhaseType enum in models/enums.py), pre_recovery_score, exercises STRUCT(name, muscle_group VARCHAR (vocab: MuscleGroup), sets, reps FLOAT[], rpe FLOAT[], weight_kg DOUBLE[], tempo, form_quality, pain_flag, notes, raw_name, muscle_source, load_type, entered_weight DOUBLE[], entered_unit)[], post_feedback, kind VARCHAR NOT NULL DEFAULT 'training' ('training' | 'habit' — a standing daily item done outside training: it counts toward volume but is excluded from recovery's training-load inputs (pain flagged in a habit still counts), the session-gap / staleness signal, deload block state and the modal-phase fallback). The per-exercise fields after `notes` were added by 0003 and are NULL on pre-0003 rows ("unknown"). `weight_kg` is the reading on the implement — per hand (dumbbells), per side (twin-stack cable), machine stack reading, or total plate load (a Smith machine's own bar weight is unknowable and excluded); `load_type` (per_hand | per_side | total | machine_stack | bodyweight, NULL = unknown) records which. A caller may log `weight` + `unit` ('kg' | 'lb') instead of `weight_kg`: weight_kg = weight × 0.45359237 for lb, and the entered values + unit are stored in `entered_weight` / `entered_unit` for read-back.
 - injury_status — location VARCHAR (vocab: PainLocation enum), status, severity 0–10, contraindicated_exercises[], safe_alternatives[]
 - phase_snapshots — snapshot_date PK, phase VARCHAR, body_weight_kg, waist_cm, specialization_lifts JSON, tendon_status_summary JSON, key_insight, next_phase_adjustment
-- decision_log — event_type, trigger_signal, reasoning_chain, alternative_rejected, future_validation_tag (audit trail)
+- decision_log — event_type, trigger_signal, reasoning_chain, alternative_rejected, future_validation_tag, payload JSON (audit trail; `payload` added by 0004 holds the complete pre-change session row — plus the post-change row for amends — so an amended/deleted session can be restored from the audit entry alone)
 - user_profiles — id UUID PK, updated_at TIMESTAMPTZ, payload JSON (append-only history; latest row = current UserProfile; goal changes audited)
 - memory_notes — id UUID PK, created_at, kind, text, tags[] (Tier 3; manual-save only; substring/tag search)
 
@@ -25,14 +25,16 @@ Local-first embedded stack: DuckDB (data/gym_coach.duckdb), Polars (never Pandas
 DB stores phase/location and the per-exercise muscle_group as VARCHAR (muscle_group since 0003, which also remapped the retired `upper_chest` to `chest`); models/enums.py is the controlled vocabulary, enforced by Pydantic at the boundary. Extending a vocabulary = edit the enum, no migration. (Supersedes v1 SPEC §1.2 "enforce via SQL ENUM".)
 
 2.3 Volume semantics (Training ch03)
-Volume currency = effective hard sets per muscle per week: sets × form_mult (form_quality < 3 ⇒ 0.5), primary + secondary contributions 1:1 (models/exercise_catalog.SECONDARY_OVERLAP), bodyweight sets count. Tonnage is reference detail only: total external load, so per_hand / per_side readings count ×2; sets with unknown load_type are counted as read and reported (`load_type_unknown_sets`). est_1rm from reps ≤ 6 sets only ("~5RM or heavier", ch04).
+Volume currency = effective hard sets per muscle per week: sets × form_mult (form_quality < 3 ⇒ 0.5), primary + secondary contributions 1:1 (models/exercise_catalog.SECONDARY_OVERLAP — DERIVED from the Training ch03 counting chart via models/doctrine_ch03.py, never hand-listed), each muscle at most once per set, `unclassified` credits nothing, bodyweight sets count. Exercise names are identities: a different implement or machine is a different identity; generic names ("Bench Press", "Fly", ...) stay valid and keep historical rows counting. Tonnage is reference detail only: total external load, so per_hand / per_side readings count ×2; sets with unknown load_type are counted as read and reported (`load_type_unknown_sets`). est_1rm from reps ≤ 6 sets only ("~5RM or heavier", ch04).
 
 3. SKILL INVENTORY (deterministic Python, no LLM logic)
-- session_logger.log_session(SessionInput) -> LogConfirmation  (<50ms)
+- session_logger.log_session(SessionInput) -> LogConfirmation  (<50ms); prepare_session() — the single validation/canonicalization path (shared with amend); records raw_name, muscle_source (catalog | keyword | caller | unclassified), load_type (catalog default when not given), entered weight + unit
+- sessions.get_session_detail(session_id | date) -> list[SessionDetail]; list_sessions(limit) (lean, + needs_review count); amend_session(SessionAmendInput) / delete_session(id) -> SessionChange (audited snapshots); restore_snapshot(audit_id) — recovery helper
+- exercise_catalog.classify()/canonicalize() — identity, keyword guess (HEURISTIC, flagged), or `unclassified`; doctrine_ch03.chart_credit()/chart_primaries() — the only source of credited muscles
 - safety_gate.check_exercise_safety(str) -> SafetyResult  (<10ms, deterministic)
 - injuries.list_injuries()/get_active_injuries()/seed_injury() — single owner of injury_status; write-time vocabulary validation + name canonicalization
 - recovery.compute_recovery_score(date) -> RecoveryScore  (<30ms)
-- trend_analysis.get_specialization_trend(muscle, window_days, end_date) -> TrendReport; hard_sets_by_muscle(start, end)  (<50ms)
+- trend_analysis.get_specialization_trend(muscle, window_days, end_date) -> TrendReport (direction: est-1RM when heavy sets exist in both halves, else per-exercise performance — double progression; detail.direction_basis / identity_directions); hard_sets_by_muscle(start, end)  (<100ms on 10K rows)
 - metrics — shared Epley/est-1RM helpers (single definition)
 - phase.current_phase()/phase_for_logging() — single phase resolver
 - snapshot.generate_phase_snapshot() -> PhaseSnapshot (incl. computed block_state + session_gap); session_gap(today) -> weeks since the last training session (habits excluded) + staleness verdict (threshold REASSESSMENT_GAP_WEEKS, a labeled heuristic)  (<200ms)
@@ -43,7 +45,7 @@ Volume currency = effective hard sets per muscle per week: sets × form_mult (fo
 
 4. SURFACES
 - CLI: python coach_tools.py <cmd> '<json>' (JSON stdout; {"error":...} + exit 1)
-- MCP: mcp_server.py (stdio; 13 coach tools + coach_doctrine) — the cross-runtime tool surface
+- MCP: mcp_server.py (stdio; 16 coach tools + coach_doctrine) — the cross-runtime tool surface. Each tool call opens the DB and releases it on return (an idle server never locks the file).
 - Persona: docs/COACH_PROMPT.md (canonical; renderable into native agent files via scripts/sync_adapters.py)
 - See docs/adapters.md. (The v1/v2 opencode native adapter was removed — MCP is the single tool surface.)
 

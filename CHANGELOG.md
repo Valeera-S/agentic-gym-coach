@@ -4,6 +4,66 @@ Notable changes to the Agentic Gym Coach. Format follows Keep-a-Changelog;
 entries are dated (the repo's version markers live in AGENTS.md's
 workspace-state line).
 
+## v2.4 — 2026-10-05 · Data-correctness pass (fork `personal`)
+
+Fixes recorded from two weeks of real use: the system logged wrong muscles,
+lost the user's own numbers, could not read a session back or correct it,
+and called progressing lifters "stalled".
+
+### Added
+- **`coach_session_detail {session_id | date}`** — any logged session read
+  back exactly as entered: identity next to the raw name, sets/reps/rpe, the
+  user's own weights and unit, load_type, muscle_source and a per-exercise
+  `needs_review`. `coach_sessions` gains a `needs_review` count.
+- **`coach_session_amend` / `coach_session_delete`** — corrections through a
+  supported path. Amend re-validates exactly like a fresh log and keeps the
+  id; omitted fields keep their stored values, `clear` removes them
+  explicitly. Both write the complete previous row to `decision_log.payload`
+  (migration 0004) — restorable from the audit entry alone. The persona
+  requires the user's explicit yes before either.
+- **Units and load types** — log `weight` + `unit` ('kg' | 'lb'; 1 lb =
+  0.45359237 kg exactly, entered values kept for read-back) and `load_type`
+  (per_hand | per_side | total | machine_stack | bodyweight; catalog
+  defaults). Tonnage counts per_hand / per_side twice.
+- **Habit sessions** (`kind = habit`) — daily items that count toward volume
+  without making recovery or the session gap think the user trained.
+- **Book editions** on every `coach_doctrine` response (the nutrition book is
+  flagged as the 2015 first edition).
+
+### Changed
+- **Exercise identities** — the catalog (65 identities, human-approved) treats
+  a different implement as a different exercise; every credited muscle is
+  derived from the Training ch03 counting chart, including its conditionals
+  (middle delts on incline pushes only, triceps primary for close-grip and
+  dips, erectors for free-weight squats only). KNOWN_DEVIATIONS is empty.
+- **Muscle vocabulary** — `chest` replaces `upper_chest` (still accepted as
+  input), plus `front_delt`, `erectors` and the `unclassified` sentinel;
+  `core` now means abdominal work only. `muscle_group` is VARCHAR in the
+  database (migration 0003) — extending the vocabulary needs no migration.
+- **Unknown exercises** are `unclassified` (credited to no muscle) instead of
+  silently counting as core; keyword guesses are ordered, word-boundary rules
+  and are reported as guesses; `muscle_source` records how each muscle was
+  decided.
+- **Trend direction** — judged on per-exercise performance (Training ch04
+  double progression) instead of set counts; unrecorded weights are unknown,
+  never 0.
+- **Connection lifecycle** — the DuckDB file is released after every tool
+  call, so an idle MCP server no longer locks out alembic or the CLI.
+- **alembic** honours `GYM_COACH_DUCKDB` and creates the data directory.
+- Recovery declares that it excludes the query date; the uncapped Epley
+  value is no longer reported.
+
+### Docs
+- Windows MCP registration (local-scope override of the POSIX `.mcp.json`),
+  connection-lifecycle and migration notes, glossary terms for exercise
+  identities, muscle_source, habit sessions and load types.
+
+### Upgrading
+Run `alembic upgrade head` (0003 + 0004). Stored `upper_chest` values become
+`chest`; rows logged before 0003 have unknown provenance/load fields.
+Historical entries that were guessed wrong can now be corrected with
+`coach_session_amend` (with the user's confirmation).
+
 ## v2.3 — 2026-09-20 · Standardized intake assessment
 
 The prompt-scripted onboarding gate is replaced by a **code-driven,
