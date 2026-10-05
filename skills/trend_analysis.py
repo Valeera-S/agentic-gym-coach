@@ -8,7 +8,12 @@ for equal hypertrophy). Rules:
     models.exercise_catalog.SECONDARY_OVERLAP, Helms ch03 overlap table)
   - form_quality < 3 discounts a set 50% (SPEC §1.3)
   - bodyweight/unloaded sets are hard sets (count 1.0 each); tonnage is
-    reported in `detail` for reference only
+    reported in `detail` for reference only, as total external load:
+    weight_kg is the reading on the implement, so per_hand / per_side loads
+    count twice (both limbs work with that load each). Sets whose load_type is
+    unknown (NULL — every pre-0003 row) are counted as read and their number
+    is reported as `load_type_unknown_sets`. A Smith machine's bar weight is
+    unknowable and never included.
 
 est_1rm_kg: Epley over sets with reps <= 6 only ("estimate 1RM only from
 ~5RM-or-heavier performances", ch04). Formula and cap live in skills/metrics.py
@@ -40,7 +45,7 @@ from .metrics import epley_expr, qualifies_for_est_1rm
 def _fetch_entries(start: date, end: date) -> pl.DataFrame:
     """Entry-level rows: one row per exercise within a session."""
     sql = """
-        SELECT date, name, mg, sets, reps, rpe, weight_kg, form_quality
+        SELECT date, name, mg, sets, reps, rpe, weight_kg, form_quality, load_type
         FROM (
             SELECT s.date,
                    UNNEST(s.exercises).name AS name,
@@ -49,12 +54,17 @@ def _fetch_entries(start: date, end: date) -> pl.DataFrame:
                    UNNEST(s.exercises).reps AS reps,
                    UNNEST(s.exercises).rpe AS rpe,
                    UNNEST(s.exercises).weight_kg AS weight_kg,
-                   UNNEST(s.exercises).form_quality AS form_quality
+                   UNNEST(s.exercises).form_quality AS form_quality,
+                   UNNEST(s.exercises).load_type AS load_type
             FROM sessions s
             WHERE s.date BETWEEN ? AND ?
         )
     """
     return get_duckdb().execute(sql, [start, end]).pl()
+
+
+# Load types whose reading is ONE limb's load while both limbs work.
+_BOTH_LIMBS = ["per_hand", "per_side"]
 
 
 def _with_form_mult(df: pl.DataFrame) -> pl.DataFrame:
@@ -98,7 +108,7 @@ def get_specialization_trend(
             muscle=muscle, window_days=window_days, effective_volume=0.0,
             avg_rpe=None, est_1rm_kg=None, stalled=False,
             trend_direction=TrendDirection.unknown, sessions_in_window=0,
-            detail={"unloaded_sets": 0, "overlap_sets": 0.0},
+            detail={"load_type_unknown_sets": 0, "unloaded_sets": 0, "overlap_sets": 0.0},
         )
 
     df = _with_form_mult(df)
@@ -115,9 +125,14 @@ def get_specialization_trend(
 
     # --- per-set metrics (reference only) ----------------------------------
     per_set = df.explode(["reps", "rpe", "weight_kg"])
+    load_mult = (
+        pl.when(pl.col("load_type").cast(pl.Utf8).is_in(_BOTH_LIMBS)).then(2.0).otherwise(1.0)
+    )
     tonnage = per_set.select(
-        (pl.col("reps") * pl.col("weight_kg") * pl.col("form_mult")).sum()
+        (pl.col("reps") * pl.col("weight_kg") * pl.col("form_mult") * load_mult).sum()
     ).item() or 0.0
+    loaded = pl.col("weight_kg").is_not_null() & pl.col("reps").is_not_null()
+    load_type_unknown = int(per_set.filter(loaded & pl.col("load_type").is_null()).height)
     avg_rpe = per_set.select(pl.col("rpe").mean()).item()
 
     qualifies = qualifies_for_est_1rm("weight_kg", "reps")
@@ -172,6 +187,7 @@ def get_specialization_trend(
         sessions_in_window=int(sessions),
         detail={
             "tonnage_kg": round(float(tonnage), 1),
+            "load_type_unknown_sets": load_type_unknown,
             "unloaded_sets": unloaded,
             "overlap_sets": float(overlap_sets),
         },

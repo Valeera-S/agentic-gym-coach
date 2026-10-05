@@ -59,6 +59,23 @@ class MuscleGroup(str, Enum):
         return None
 
 
+class LoadType(str, Enum):
+    """How a logged weight was measured on the implement (weight_kg is "the
+    reading on the implement"). per_hand / per_side mean BOTH limbs work with
+    that load each; a single-arm movement uses `total`."""
+
+    per_hand = "per_hand"            # dumbbells: one hand's load
+    per_side = "per_side"            # twin-stack cable: one side's stack
+    total = "total"                  # barbell / plate-loaded: whole external load
+    machine_stack = "machine_stack"  # selectorized machine / single cable stack reading
+    bodyweight = "bodyweight"        # no external load recorded
+
+
+class WeightUnit(str, Enum):
+    kg = "kg"
+    lb = "lb"
+
+
 class PhaseType(str, Enum):
     maintenance = "maintenance"            # off-season / no specific push
     reconditioning = "reconditioning"      # return from layoff or into base work

@@ -77,8 +77,13 @@ def coach_log_session(date: str, exercises: list[dict], phase: str | None = None
                       pre_recovery_score: int | None = None) -> dict:
     """Persist a training session (validated, canonicalized, anomaly-flagged).
 
-    exercises: [{name, sets, reps[], rpe[], weight_kg[], tempo?, form_quality?, pain_flag?, notes?}] —
-    arrays are per-set, equal length; weight_kg null = bodyweight/unrecorded.
+    exercises: [{name, sets, reps[], rpe[], weight_kg[] | (weight[] + unit), load_type?, tempo?,
+    form_quality?, pain_flag?, notes?}] — arrays are per-set, equal length; weight_kg null =
+    bodyweight/unrecorded. Instead of weight_kg send the numbers as read off the equipment:
+    weight[] + unit ('kg' | 'lb'; 1 lb = 0.45359237 kg), never both. load_type: per_hand
+    (dumbbells) | per_side (twin-stack cable) | total (bar / plate-loaded) | machine_stack |
+    bodyweight — how the reading was taken. per_hand / per_side mean BOTH limbs each lift that
+    load (tonnage counts it twice); a single-arm or one-side movement uses total.
     """
     return _run("log_session", {"date": date, "exercises": exercises,
                                 "phase": phase, "post_feedback": post_feedback,
@@ -101,7 +106,7 @@ def coach_recovery(date: str | None = None) -> dict:
 def coach_trend(muscle: str,
                 window_days: int = coach_tools.DEFAULT_TREND_WINDOW_DAYS,
                 end_date: str | None = None) -> dict:
-    """Effective hard sets, avg RPE, est 1RM (≤6-rep sets), trend direction, and stall flag for a muscle group over a window (detail block: tonnage, unloaded/overlap sets)."""
+    """Effective hard sets, avg RPE, est 1RM (≤6-rep sets), trend direction, and stall flag for a muscle group over a window (detail block: tonnage = total external load, x2 for per_hand/per_side readings; load_type_unknown_sets; unloaded/overlap sets)."""
     return _run("trend", {"muscle": muscle, "window_days": window_days, "end_date": end_date})
 
 

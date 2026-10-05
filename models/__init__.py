@@ -4,10 +4,12 @@ from .enums import (
     AnomalyCode,
     DecisionEventType,
     InjuryState,
+    LoadType,
     MuscleGroup,
     PainLocation,
     PhaseType,
     TrendDirection,
+    WeightUnit,
 )
 from .exercise_catalog import SECONDARY_OVERLAP, canonicalize
 from .injury import InjurySeedResult, InjuryStatus, SafetyResult
@@ -43,6 +45,8 @@ __all__ = [
     "AnomalyCode",
     "DecisionEventType",
     "InjuryState",
+    "LoadType",
+    "WeightUnit",
     "SECONDARY_OVERLAP",
     "canonicalize",
     "MuscleGroup",

@@ -66,6 +66,11 @@ def _to_struct_list(exercises: list[ExerciseModel]) -> list[dict]:
             "form_quality": ex.form_quality,
             "pain_flag": ex.pain_flag,
             "notes": ex.notes,
+            "load_type": ex.load_type.value if ex.load_type else None,
+            # entered values are kept only when the caller used weight + unit;
+            # a weight_kg caller entered kg, which weight_kg already holds
+            "entered_weight": ex.weight if ex.unit else None,
+            "entered_unit": ex.unit.value if ex.unit else None,
         }
         for ex in exercises
     ]

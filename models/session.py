@@ -11,7 +11,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .enums import AnomalyCode, MuscleGroup, PhaseType
+from .enums import AnomalyCode, LoadType, MuscleGroup, PhaseType, WeightUnit
+
+# The international pound, exact by definition (1959 agreement).
+LB_TO_KG = 0.45359237
 
 # Per-set plausibility bounds. None = unrecorded (bodyweight / not tracked).
 # Upper bounds are generous human headroom, not physiology: they exist so
@@ -24,12 +27,30 @@ _PER_SET_BOUNDS: dict[str, tuple[float, float]] = {
 }
 
 
+def _same_loads(a: list[float | None], b: list[float | None]) -> bool:
+    return len(a) == len(b) and all(
+        (x is None and y is None)
+        or (x is not None and y is not None and math.isclose(x, y, rel_tol=1e-12, abs_tol=1e-9))
+        for x, y in zip(a, b)
+    )
+
+
 class ExerciseModel(BaseModel):
     """One exercise within a session. Arrays are per-set.
 
     `muscle_group` is optional on input — the user logs raw exercise names
     and session_logger fills it via the exercise_catalog so the user never
     has to categorize. It's set to non-null before the DB write.
+
+    Weights: `weight_kg` is "the reading on the implement" — per hand for
+    dumbbells, per side for a twin-stack cable, the stack reading on a machine,
+    the total plate load on a bar (a Smith machine's own bar weight is
+    unknowable and never included). `load_type` says which of those it is
+    (optional; NULL = unknown). Instead of `weight_kg` a caller may send the
+    numbers as read off the gym's equipment — `weight` + `unit` ('kg' | 'lb');
+    weight_kg is then computed with 1 lb = 0.45359237 kg and the entered values
+    are kept for read-back. Sending both forms is rejected unless they agree
+    exactly (which is also what makes re-validating a converted model a no-op).
     """
 
     name: str
@@ -38,6 +59,9 @@ class ExerciseModel(BaseModel):
     reps: list[float | None] = Field(default_factory=list)
     rpe: list[float | None] = Field(default_factory=list)  # 1-10, None = unrecorded
     weight_kg: list[float | None] = Field(default_factory=list)  # per-set load; None=bodyweight/unrecorded
+    weight: list[float | None] = Field(default_factory=list)  # per-set load AS ENTERED, in `unit`
+    unit: WeightUnit | None = None  # unit of `weight`; never of weight_kg
+    load_type: LoadType | None = None  # how the reading was taken; None = unknown
     tempo: str | None = None  # e.g. "3-1-X-1"
     form_quality: int = Field(default=5, ge=1, le=5)
     pain_flag: bool = False
@@ -55,6 +79,49 @@ class ExerciseModel(BaseModel):
             if not lo <= x <= hi:
                 raise ValueError(f"{info.field_name} values must be within {lo:g}..{hi:g} (got {x:g})")
         return v
+
+    @field_validator("weight", mode="before")
+    @classmethod
+    def _null_weight_is_not_given(cls, v):
+        # an LLM caller often fills optional keys with null; `weight: null`
+        # means "not using the weight + unit form", like `unit: null`
+        return [] if v is None else v
+
+    @field_validator("weight")
+    @classmethod
+    def _sane_entered_weights(cls, v: list[float | None]) -> list[float | None]:
+        for x in v:
+            if x is not None and (not math.isfinite(x) or x < 0):
+                raise ValueError(f"weight values must be finite and >= 0 (got {x:g})")
+        return v
+
+    @model_validator(mode="after")
+    def _entered_weight_to_kg(self) -> "ExerciseModel":
+        # Runs before the alignment check below (validators run in order).
+        if not self.weight and self.unit is None:
+            return self
+        if self.unit is None:
+            raise ValueError("weight needs a unit: 'kg' or 'lb'")
+        if not self.weight:
+            raise ValueError("unit applies to `weight`, which is empty — send the "
+                             "per-set values as `weight` (weight_kg is always kg)")
+        factor = LB_TO_KG if self.unit is WeightUnit.lb else 1.0
+        lo, hi = _PER_SET_BOUNDS["weight_kg"]
+        kg: list[float | None] = []
+        for w in self.weight:
+            if w is None:
+                kg.append(None)
+                continue
+            value = w * factor
+            if not lo <= value <= hi:
+                raise ValueError(f"weight {w:g} {self.unit.value} is {value:g} kg, "
+                                 f"outside {lo:g}..{hi:g} kg")
+            kg.append(value)
+        if self.weight_kg and not _same_loads(self.weight_kg, kg):
+            raise ValueError("send either weight_kg or weight + unit, not both "
+                             "(the two given here disagree)")
+        self.weight_kg = kg
+        return self
 
     @model_validator(mode="after")
     def _per_set_arrays_aligned(self) -> "ExerciseModel":
