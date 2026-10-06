@@ -99,3 +99,13 @@ def test_tendon_summary_shape():
     seed_injury("lower_back", "resolved", 1)
     summary = tendon_summary()
     assert summary == {"left_elbow": {"status": "active", "severity": 5}}
+
+
+# --- P35: ban/alternative lists must be lists of non-blank strings ----------
+
+@pytest.mark.parametrize("field", ["contraindicated_exercises", "safe_alternatives"])
+@pytest.mark.parametrize("bad", ["Leg Press", [""], ["  "], ["Squat", None], [3], 5])
+def test_seed_rejects_non_list_or_blank_names_and_writes_nothing(field, bad):
+    with pytest.raises(ValueError):
+        seed_injury("left_knee", "active", 4, **{field: bad})
+    assert _injury_rows() == 0

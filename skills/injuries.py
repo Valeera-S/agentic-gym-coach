@@ -52,6 +52,24 @@ def _canonicalize_names(names: list[str]) -> tuple[list[str], list[str]]:
     return stored, review
 
 
+def _name_list(field: str, value: Any) -> list[str]:
+    """Strict exercise-name list: a real list of non-blank strings, else ValueError.
+
+    A bare string must never reach list() (it would be stored as one ban per
+    character and the real ban silently lost), and a blank entry would be an
+    empty-string ban that matches nothing — both fail-open shapes (P35).
+    Raised before any write; surfaces as `invalid_input`.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{field} must be a list of exercise names, got {type(value).__name__}")
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{field} must contain only non-blank strings, got {item!r}")
+    return list(value)
+
+
 def list_injuries(active_only: bool = False) -> list[InjuryStatus]:
     """Injury rows as models, newest first (`active_only` skips resolved)."""
     sql = f"SELECT id, {_COLS} FROM injury_status"
@@ -78,8 +96,8 @@ def seed_injury(location: str, status: str, severity: int,
     """
     injury = InjuryStatus(
         location=location, status=status, severity=severity,
-        contraindicated_exercises=list(contraindicated_exercises or []),
-        safe_alternatives=list(safe_alternatives or []),
+        contraindicated_exercises=_name_list("contraindicated_exercises", contraindicated_exercises),
+        safe_alternatives=_name_list("safe_alternatives", safe_alternatives),
     )
     stored_contra, review = _canonicalize_names(injury.contraindicated_exercises)
     stored_alts, alt_review = _canonicalize_names(injury.safe_alternatives)
