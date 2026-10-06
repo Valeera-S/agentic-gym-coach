@@ -28,10 +28,17 @@ est_1rm_kg: Epley over sets with reps <= 6 only ("estimate 1RM only from
 anywhere: Epley at 12+ reps is badly off, and a number shown beside the
 correctly-null est_1rm_kg would read as usable.
 
-Window halves and session counting: `sessions_in_window` is the number of distinct
-TRAINING session ids (two sessions on one day are two). The halves are by
-training-session order — (date, created_at, id) — the first floor(n/2) sessions
-vs the rest; never halves of the distinct dates.
+Window halves and session counting — TWO counts (P60):
+  - `sessions_in_window` = distinct TRAINING session ids that credit the muscle
+    any volume, overlap (secondary) credit included (two sessions on one day
+    are two). Descriptive only.
+  - `detail.direction_sessions` = the training sessions holding at least one
+    exercise for which the muscle is a direction-deciding credit (chart
+    primary; for an unknown name, its stored muscle). THIS count gates
+    direction and `stalled` (>= 4): a back day crediting chest only through
+    Straight Arm Pulldown must not make chest look measured.
+The halves are by direction-session order — (date, created_at, id) — the first
+floor(n/2) direction sessions vs the rest; never halves of the distinct dates.
 
 trend_direction: est-1RM trend across window halves, judged PER EXERCISE
 IDENTITY (P46): only identities for which the muscle is a chart PRIMARY (for an
@@ -95,6 +102,9 @@ from models.exercise_catalog import (
 
 from .init import get_duckdb
 from .metrics import epley_expr, est_1rm, qualifies_for_est_1rm
+
+
+MIN_DIRECTION_SESSIONS = 4  # direction / `stalled` need this many direction sessions
 
 
 def window_start(end: date, window_days: int) -> date:
@@ -381,7 +391,8 @@ def get_specialization_trend(
             muscle=muscle, window_days=window_days, effective_volume=0.0,
             avg_rpe=None, est_1rm_kg=None, stalled=False,
             trend_direction=TrendDirection.unknown, sessions_in_window=0,
-            detail={"load_type_unknown_sets": 0, "unloaded_sets": 0, "overlap_sets": 0.0,
+            detail={"direction_sessions": 0, "load_type_unknown_sets": 0,
+                    "unloaded_sets": 0, "overlap_sets": 0.0,
                     "direction_basis": None, "identity_directions": {}},
         )
 
@@ -431,9 +442,13 @@ def get_specialization_trend(
     trend_direction = TrendDirection.unknown
     direction_basis: str | None = None
     identity_directions: dict[str, str] = {}
-    if sessions >= 4:
-        # halves by training-session order: (date, created_at, id), first n//2 vs the rest
-        order = df.select("sid", "date", "created_at").unique(subset="sid").sort(
+    # P60: the gate counts DIRECTION sessions — training sessions holding an
+    # exercise for which the muscle is a chart primary — never overlap-only ones
+    direction_df = df.filter(pl.col("primary"))
+    direction_sessions = direction_df["sid"].n_unique()
+    if direction_sessions >= MIN_DIRECTION_SESSIONS:
+        # halves by direction-session order: (date, created_at, id), first n//2 vs the rest
+        order = direction_df.select("sid", "date", "created_at").unique(subset="sid").sort(
             ["date", "created_at", "sid"])
         first_ids = set(order["sid"].head(order.height // 2).to_list())
 
@@ -457,6 +472,7 @@ def get_specialization_trend(
         stalled=stalled, trend_direction=trend_direction,
         sessions_in_window=int(sessions),
         detail={
+            "direction_sessions": int(direction_sessions),
             "tonnage_kg": round(float(tonnage), 1),
             "load_type_unknown_sets": load_type_unknown,
             "unloaded_sets": unloaded,
