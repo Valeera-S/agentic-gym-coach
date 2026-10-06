@@ -165,3 +165,33 @@ def test_no_argless_handler_returns_a_bare_list():
     for name in ("sessions", "injuries_list", "memory_search", "profile_get",
                  "intake_status", "snapshot", "bodyweight_history", "recovery"):
         assert not isinstance(DISPATCH[name]({}), list), name
+
+
+# --- unknown command follows the error contract (P43) ---------------------------
+
+def _cli(*argv):
+    import subprocess
+    import sys
+    from pathlib import Path
+    return subprocess.run([sys.executable, "coach_tools.py", *argv],
+                          cwd=Path(__file__).resolve().parents[1],
+                          capture_output=True, text=True, timeout=60)
+
+
+def test_cli_unknown_command_uses_the_error_contract():
+    import json
+    out = _cli("bogus")
+    assert out.returncode == 1
+    payload = json.loads(out.stdout)
+    assert payload["error"] == "invalid_input"
+    assert payload["exception"] == "UnknownCommand"
+    assert "bogus" in payload["detail"]
+    assert payload["available"] == list(DISPATCH)
+
+
+def test_cli_no_args_and_help_still_list_commands_with_exit_0():
+    import json
+    for argv in ((), ("--help",)):
+        out = _cli(*argv)
+        assert out.returncode == 0
+        assert json.loads(out.stdout) == {"available": list(DISPATCH)}

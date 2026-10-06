@@ -64,7 +64,8 @@ def _run(cmd: str, args: dict) -> dict:
     try:
         fn = coach_tools.DISPATCH[cmd]
     except KeyError:
-        return {"error": f"unknown command '{cmd}'"}
+        return {"error": "invalid_input", "exception": "UnknownCommand",
+                "detail": f"unknown command '{cmd}'"}
     try:
         return fn(args)
     except Exception as e:  # surface the failure, never fabricate

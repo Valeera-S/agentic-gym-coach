@@ -261,8 +261,10 @@ def main() -> None:
     cmd = sys.argv[1]
     fn = DISPATCH.get(cmd)
     if fn is None:
-        print(json.dumps({"error": f"unknown command '{cmd}'", "available": list(DISPATCH)}))
-        sys.exit(2)
+        # same three-code contract as every other failure (+ the list to pick from)
+        print(json.dumps({"error": "invalid_input", "exception": "UnknownCommand",
+                          "detail": f"unknown command '{cmd}'", "available": list(DISPATCH)}))
+        sys.exit(1)
     try:
         # the argument is parsed INSIDE the error contract: malformed JSON, or
         # JSON that is not an object (handlers take a dict), is invalid_input —
