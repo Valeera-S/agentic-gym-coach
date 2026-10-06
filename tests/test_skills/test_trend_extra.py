@@ -207,3 +207,26 @@ def test_mismatched_set_array_lengths_align_to_sets(reps, rpe, weight, n_weights
     generate_phase_snapshot()
     # unrecorded (padded) weights are counted per stored `sets`, 3 per session
     assert r.detail["unloaded_sets"] == 4 * (3 - n_weights)
+
+
+# --- P55: a recorded 0-rep set is neither a hard set nor an est-1RM source -----
+
+def test_zero_rep_set_is_not_a_hard_set_and_gives_no_1rm():
+    from skills.init import get_duckdb
+    today = date.today()
+    _log(today - timedelta(days=1), [200.0, 100.0, 100.0], name="Squat")
+    get_duckdb().execute(_NULL_ARRAY_UPDATE.format(
+        reps="[0, 5, 5]::FLOAT[]", rpe="x.rpe", weight="x.weight_kg"))
+    r = get_specialization_trend(MuscleGroup.quads, window_days=28, end_date=today)
+    assert r.est_1rm_kg == pytest.approx(100 * (1 + 5 / 30), abs=0.1)   # not 200
+    assert r.effective_volume == pytest.approx(2.0)
+    assert hard_sets_by_muscle(today - timedelta(days=7), today)["quads"] == pytest.approx(2.0)
+
+
+def test_unrecorded_rep_count_still_counts_as_a_hard_set():
+    from skills.init import get_duckdb
+    today = date.today()
+    _log(today - timedelta(days=1), [100.0, 100.0], name="Squat")
+    get_duckdb().execute(_NULL_ARRAY_UPDATE.format(
+        reps="NULL::FLOAT[]", rpe="x.rpe", weight="x.weight_kg"))
+    assert hard_sets_by_muscle(today - timedelta(days=7), today)["quads"] == pytest.approx(2.0)

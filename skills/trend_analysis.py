@@ -12,6 +12,7 @@ for equal hypertrophy). Rules:
     stored under a name that is now an alias (or a pre-split legacy name)
     still credits its identity's muscles
   - form_quality < 3 discounts a set 50% (SPEC §1.3)
+  - a RECORDED 0-rep set is not a hard set (P55); an unrecorded rep count still is
   - bodyweight/unloaded sets are hard sets (count 1.0 each); tonnage is
     reported in `detail` for reference only, as total external load:
     weight_kg is the reading on the implement, so per_hand / per_side loads
@@ -139,7 +140,12 @@ def _fetch_entries(start: date, end: date) -> pl.DataFrame:
           )
         )
     """
-    return get_duckdb().execute(sql, [start, end]).pl()
+    df = get_duckdb().execute(sql, [start, end]).pl()
+    # P55: a recorded 0-rep set is not a hard set; an unrecorded count still is
+    return df.with_columns((
+        pl.col("sets").fill_null(0)
+        - pl.col("reps").list.eval(pl.element() <= 0).list.sum().fill_null(0)
+    ).alias("hard_sets"))
 
 
 # Load types whose reading is ONE limb's load while both limbs work.
@@ -169,7 +175,7 @@ def hard_sets_by_muscle(start: date, end: date) -> dict[str, float]:
         return {}
     df = _with_form_mult(df)
     out: dict[str, float] = {}
-    for name, mg, sets, mult in df.select("name", "mg", "sets", "form_mult").iter_rows():
+    for name, mg, sets, mult in df.select("name", "mg", "hard_sets", "form_mult").iter_rows():
         if name is None:
             continue  # legacy nameless entry: credits no muscle (P47)
         for m in credited_muscles(name, mg):
@@ -228,7 +234,7 @@ def _performance_direction(df: pl.DataFrame, muscle: str,
     shown: dict[str, str] = {}
     bodyweight_keys: set[str] = set()
     for d, name, ident, mg, sets, reps, loads, mult, load_type in df.select(
-            "date", "name", "identity", "mg", "sets", "reps", "weight_kg", "form_mult",
+            "date", "name", "identity", "mg", "hard_sets", "reps", "weight_kg", "form_mult",
             "load_type").iter_rows():
         if muscle not in progression_muscles(name, mg):
             continue  # overlap credit: volume only, never progression
@@ -311,10 +317,10 @@ def get_specialization_trend(
     )
 
     # --- hard sets (primary metric) ---------------------------------------
-    hard_sets = df.select((pl.col("sets") * pl.col("form_mult")).sum()).item() or 0.0
+    hard_sets = df.select((pl.col("hard_sets") * pl.col("form_mult")).sum()).item() or 0.0
     overlap_sets = (
         df.filter(pl.col("is_overlap"))
-        .select((pl.col("sets") * pl.col("form_mult")).sum()).item() or 0.0
+        .select((pl.col("hard_sets") * pl.col("form_mult")).sum()).item() or 0.0
     )
 
     # --- per-set metrics (reference only) ----------------------------------

@@ -1,7 +1,7 @@
 """metrics — shared training math (one definition per doctrine constant).
 
 Single home of the Epley est-1RM doctrine (Training ch04): estimates come
-from reps <= EPLEY_MAX_REPS sets only ("~5RM or heavier"); higher-rep sets
+from sets with 1 <= reps <= EPLEY_MAX_REPS only ("~5RM or heavier"); higher-rep sets
 produce no estimate at all, not even as reference detail.
 
 Used by trend_analysis and snapshot. Editing the formula or the cap here
@@ -31,5 +31,6 @@ def qualifies_for_est_1rm(weight_col: str, reps_col: str) -> pl.Expr:
     return (
         pl.col(weight_col).is_not_null()
         & pl.col(reps_col).is_not_null()
+        & (pl.col(reps_col) >= 1)  # a 0-rep (or <1) set is not a performance (P55)
         & (pl.col(reps_col) <= EPLEY_MAX_REPS)
     )

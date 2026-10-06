@@ -24,3 +24,10 @@ def test_qualifier_requires_load_and_heavy_reps():
     df = pl.DataFrame({"w": [100.0, None, 100.0, 100.0], "r": [6, 6, 7, None]})
     keep = df.filter(qualifies_for_est_1rm("w", "r"))
     assert keep.height == 1  # only the loaded 6-rep set qualifies
+
+
+def test_qualifier_rejects_zero_and_fractional_reps_below_one():
+    # P55: a stored legacy 0-rep set at 200 kg must not yield est_1rm 200
+    df = pl.DataFrame({"w": [200.0, 200.0, 100.0, 100.0], "r": [0.0, 0.5, 1.0, 6.0]})
+    keep = df.filter(qualifies_for_est_1rm("w", "r"))
+    assert keep["r"].to_list() == [1.0, 6.0]
