@@ -11,7 +11,9 @@ for equal hypertrophy). Rules:
   - stored exercise names are resolved through the catalog first, so a row
     stored under a name that is now an alias (or a pre-split legacy name)
     still credits its identity's muscles
-  - form_quality < 3 discounts a set 50% (SPEC §1.3)
+  - form_quality < 3 discounts a set 50% (SPEC §1.3) — effective hard sets only,
+    never tonnage (P48)
+  - a RECORDED 0-rep set is not a hard set (P55); an unrecorded rep count still is
   - bodyweight/unloaded sets are hard sets (count 1.0 each); tonnage is
     reported in `detail` for reference only, as total external load:
     weight_kg is the reading on the implement, so per_hand / per_side loads
@@ -26,8 +28,20 @@ est_1rm_kg: Epley over sets with reps <= 6 only ("estimate 1RM only from
 anywhere: Epley at 12+ reps is badly off, and a number shown beside the
 correctly-null est_1rm_kg would read as usable.
 
-trend_direction: est-1RM trend across window halves when qualifying heavy
-sets exist in both halves (±2%). Otherwise — the usual hypertrophy case, most
+Window halves and session counting: `sessions_in_window` is the number of distinct
+TRAINING session ids (two sessions on one day are two). The halves are by
+training-session order — (date, created_at, id) — the first floor(n/2) sessions
+vs the rest; never halves of the distinct dates.
+
+trend_direction: est-1RM trend across window halves, judged PER EXERCISE
+IDENTITY (P46): only identities for which the muscle is a chart PRIMARY (for an
+unknown name: its stored muscle — the same rule as the performance path) vote,
+and only those with qualifying heavy sets (1 <= reps <= 6) in BOTH halves; an
+identity present in one half only does not vote, so an implement switch is not a
+regression. Each compares its best Epley estimate across halves (±2%) and the
+verdicts are aggregated by effective sets exactly as below. The reported
+est_1rm_kg likewise comes only from primary-credit identities (overlap-only
+exercises never supply it). With no voting identity — the usual hypertrophy case, most
 sets in the 6-12 range (ch03) — direction is judged on PERFORMANCE per
 exercise identity, the double-progression semantics of ch04:
   up   = more load at >= the same reps, or more reps at the same load
@@ -105,22 +119,26 @@ def window_start(end: date, window_days: int) -> date:
 # columns plus `sets` in an inner query, adds SET_COUNT_SQL in a middle one and
 # splices PADDED_SET_ARRAYS_SQL into the outer select; every reader that
 # explodes the three arrays together uses this pair.
-SET_COUNT_SQL = ("greatest(coalesce(sets, 0), coalesce(len(reps_raw), 0), "
-                 "coalesce(len(rpe_raw), 0), coalesce(len(weight_raw), 0)) AS _n")
+#
+# P47: a legacy row's arrays may also disagree with each other or with `sets`.
+# `sets` is the authority: every array is aligned to it — padded with NULL
+# (unrecorded) when shorter, truncated when longer — so they always explode
+# to the same row count.
+SET_COUNT_SQL = "greatest(coalesce(sets, 0), 0) AS _n"
 PADDED_SET_ARRAYS_SQL = """
-        coalesce(reps_raw, list_transform(range(_n), x -> NULL::FLOAT)) AS reps,
-        coalesce(rpe_raw, list_transform(range(_n), x -> NULL::FLOAT)) AS rpe,
-        coalesce(weight_raw, list_transform(range(_n), x -> NULL::DOUBLE)) AS weight_kg"""
+        list_resize(coalesce(reps_raw, []::FLOAT[]), _n) AS reps,
+        list_resize(coalesce(rpe_raw, []::FLOAT[]), _n) AS rpe,
+        list_resize(coalesce(weight_raw, []::DOUBLE[]), _n) AS weight_kg"""
 
 
 def _fetch_entries(start: date, end: date) -> pl.DataFrame:
     """Entry-level rows: one row per exercise within a session."""
     sql = f"""
-        SELECT date, kind, name, mg, sets, form_quality, load_type, {PADDED_SET_ARRAYS_SQL}
+        SELECT sid, created_at, date, kind, name, mg, sets, form_quality, load_type, {PADDED_SET_ARRAYS_SQL}
         FROM (
           SELECT *, {SET_COUNT_SQL}
           FROM (
-            SELECT s.date,
+            SELECT CAST(s.id AS VARCHAR) AS sid, s.created_at AS created_at, s.date,
                    s.kind AS kind,
                    UNNEST(s.exercises).name AS name,
                    CAST(UNNEST(s.exercises).muscle_group AS VARCHAR) AS mg,
@@ -135,7 +153,12 @@ def _fetch_entries(start: date, end: date) -> pl.DataFrame:
           )
         )
     """
-    return get_duckdb().execute(sql, [start, end]).pl()
+    df = get_duckdb().execute(sql, [start, end]).pl()
+    # P55: a recorded 0-rep set is not a hard set; an unrecorded count still is
+    return df.with_columns((
+        pl.col("sets").fill_null(0)
+        - pl.col("reps").list.eval(pl.element() <= 0).list.sum().fill_null(0)
+    ).alias("hard_sets"))
 
 
 # Load types whose reading is ONE limb's load while both limbs work.
@@ -165,7 +188,9 @@ def hard_sets_by_muscle(start: date, end: date) -> dict[str, float]:
         return {}
     df = _with_form_mult(df)
     out: dict[str, float] = {}
-    for name, mg, sets, mult in df.select("name", "mg", "sets", "form_mult").iter_rows():
+    for name, mg, sets, mult in df.select("name", "mg", "hard_sets", "form_mult").iter_rows():
+        if name is None:
+            continue  # legacy nameless entry: credits no muscle (P47)
         for m in credited_muscles(name, mg):
             out[m] = out.get(m, 0.0) + (sets or 0) * mult
     return {k: float(v) for k, v in out.items()}
@@ -205,42 +230,42 @@ def _load_step(heavier_half: list[tuple[float, float]], heavier: tuple[float, fl
     return h >= l or math.isclose(h, l, rel_tol=1e-9, abs_tol=1e-9)
 
 
-def _is_bodyweight(name: str, stored_load_type: str | None) -> bool:
-    """Whether a null weight on this row means 'no external load' (counts as 0)
-    rather than 'not recorded' (unknown). Legacy rows (no stored load_type)
-    fall back to the identity's catalog default."""
-    if stored_load_type is not None:
-        return stored_load_type == LoadType.bodyweight.value
-    return default_load_type(name) is LoadType.bodyweight
+def _performance_direction(df: pl.DataFrame,
+                           first_ids: set) -> tuple[TrendDirection, dict[str, str]]:
+    """Double-progression direction from per-identity top sets of the rows whose
+    `primary` flag is set (the muscle is a chart primary of the identity).
 
-
-def _performance_direction(df: pl.DataFrame, muscle: str,
-                           first_dates: set) -> tuple[TrendDirection, dict[str, str]]:
-    """Double-progression direction for `muscle` from per-identity top sets."""
+    A null weight means 'no external load' (counts as 0) only for a bodyweight
+    row — stored load_type, else (legacy rows) the identity's catalog default —
+    otherwise it is 'not recorded' (unknown)."""
     halves: dict[str, tuple[list, list]] = {}
     weight: dict[str, float] = {}
     shown: dict[str, str] = {}
     bodyweight_keys: set[str] = set()
-    for d, name, ident, mg, sets, reps, loads, mult, load_type in df.select(
-            "date", "name", "identity", "mg", "sets", "reps", "weight_kg", "form_mult",
-            "load_type").iter_rows():
-        if muscle not in progression_muscles(name, mg):
+    default_bw: dict[str, bool] = {}
+    # `key` / `primary` come from _with_direction_cols (the catalog lookups are
+    # cached there per distinct name, not repeated per row)
+    for sid, name, key, primary, ident, sets, reps, loads, mult, load_type in df.select(
+            "sid", "name", "key", "primary", "identity", "hard_sets", "reps", "weight_kg",
+            "form_mult", "load_type").iter_rows():
+        if not primary:
             continue  # overlap credit: volume only, never progression
-        bodyweight = _is_bodyweight(name, load_type)
+        if name not in default_bw:
+            default_bw[name] = default_load_type(name) is LoadType.bodyweight
+        bodyweight = (load_type == LoadType.bodyweight.value if load_type is not None
+                      else default_bw[name])
         reps = reps or []
         loads = loads or [None] * len(reps)
         pairs = [(0.0 if w is None else w, r) for r, w in zip(reps, loads)
                  if r is not None and (w is not None or bodyweight)]
-        # unknown names group case-insensitively ("meadows row" == "Meadows Row")
-        key = ident if resolve_name(name) else lookup_key(name)
         shown.setdefault(key, ident)
         # The load-step exclusion is per IDENTITY: a bodyweight exercise stays
         # one even when the caller declares an added-load reading ("total" for
         # a belt-weighted pull-up) — its true load still includes body mass.
-        if bodyweight or default_load_type(name) is LoadType.bodyweight:
+        if bodyweight or default_bw[name]:
             bodyweight_keys.add(key)
         first, second = halves.setdefault(key, ([], []))
-        (first if d in first_dates else second).extend(pairs)
+        (first if sid in first_ids else second).extend(pairs)
         weight[key] = weight.get(key, 0.0) + (sets or 0) * mult
 
     verdicts: dict[str, str] = {}
@@ -270,6 +295,70 @@ def _performance_direction(df: pl.DataFrame, muscle: str,
     return TrendDirection.plateau, verdicts
 
 
+def _with_direction_cols(df: pl.DataFrame, muscle: str) -> pl.DataFrame:
+    """Add `key` (the identity a row is judged under: the catalog identity, or
+    the case-folded stored name for an unknown one) and `primary` (the muscle is
+    a chart primary of that identity — for an unknown name, its stored muscle).
+    Single source for the est-1RM direction path and the reported est_1rm_kg."""
+    cache: dict[tuple, tuple[str, bool]] = {}
+    keys: list[str] = []
+    primary: list[bool] = []
+    for name, mg, ident in df.select("name", "mg", "identity").iter_rows():
+        hit = cache.get((name, mg))
+        if hit is None:
+            hit = cache[(name, mg)] = (
+                ident if resolve_name(name) else lookup_key(name),
+                muscle in progression_muscles(name, mg))
+        keys.append(hit[0])
+        primary.append(hit[1])
+    return df.with_columns(pl.Series("key", keys, dtype=pl.Utf8),
+                           pl.Series("primary", primary, dtype=pl.Boolean))
+
+
+def _est_1rm_direction(df: pl.DataFrame, per_set: pl.DataFrame,
+                       first_ids: set) -> tuple[TrendDirection | None, dict[str, str]]:
+    """est-1RM direction, judged per exercise identity (P46).
+
+    Only identities for which the muscle is a chart primary vote, and only
+    those with qualifying heavy sets (metrics.qualifies_for_est_1rm) in BOTH
+    halves; each compares its best Epley estimate across halves (+-2% band).
+    Verdicts are aggregated by effective sets exactly like the performance
+    path. None = no identity votes (the caller falls back to performance)."""
+    best = (per_set.filter(pl.col("primary") & qualifies_for_est_1rm("weight_kg", "reps"))
+            .with_columns(epley_expr("weight_kg", "reps").alias("_est"),
+                          pl.col("sid").is_in(list(first_ids)).alias("_first"))
+            .group_by("key", "_first").agg(pl.col("_est").max()))
+    est: dict[str, dict[bool, float]] = {}
+    for key, is_first, val in best.iter_rows():
+        est.setdefault(key, {})[is_first] = val
+    weight: dict[str, float] = {}
+    shown: dict[str, str] = {}
+    for key, ident, sets, mult in df.filter(pl.col("primary")).select(
+            "key", "identity", "hard_sets", "form_mult").iter_rows():
+        shown.setdefault(key, ident)
+        weight[key] = weight.get(key, 0.0) + (sets or 0) * mult
+    verdicts: dict[str, str] = {}
+    up_sets = down_sets = 0.0
+    for key, halves in sorted(est.items()):
+        if len(halves) < 2:
+            continue  # heavy sets in only one half: this identity does not vote
+        first, second = halves[True], halves[False]
+        verdict = ("up" if second > first * 1.02 else
+                   "down" if second < first * 0.98 else "flat")
+        verdicts[shown[key]] = verdict
+        if verdict == "up":
+            up_sets += weight[key]
+        elif verdict == "down":
+            down_sets += weight[key]
+    if not verdicts:
+        return None, verdicts
+    if up_sets > down_sets:
+        return TrendDirection.up, verdicts
+    if down_sets > up_sets:
+        return TrendDirection.down, verdicts
+    return TrendDirection.plateau, verdicts
+
+
 def get_specialization_trend(
     muscle: MuscleGroup, window_days: int = 28, end_date: date | None = None
 ) -> TrendReport:
@@ -279,7 +368,8 @@ def get_specialization_trend(
     # end_date lets the coach analyze/backtest historical slices; default today.
     anchor = end_date or date.today()
     start = window_start(anchor, window_days)
-    df = _fetch_entries(start, anchor)
+    # a legacy nameless entry credits no muscle (P47), whatever its stored muscle
+    df = _fetch_entries(start, anchor).filter(pl.col("name").is_not_null())
 
     crediting = list(exercises_crediting(muscle))
     df = with_identity(df).filter(
@@ -295,7 +385,7 @@ def get_specialization_trend(
                     "direction_basis": None, "identity_directions": {}},
         )
 
-    df = _with_form_mult(df)
+    df = _with_direction_cols(_with_form_mult(df), muscle.value)
     # credited other than through the row's stored primary (a row whose
     # stored primary IS the muscle is a primary credit, never also an overlap)
     df = df.with_columns(
@@ -304,10 +394,10 @@ def get_specialization_trend(
     )
 
     # --- hard sets (primary metric) ---------------------------------------
-    hard_sets = df.select((pl.col("sets") * pl.col("form_mult")).sum()).item() or 0.0
+    hard_sets = df.select((pl.col("hard_sets") * pl.col("form_mult")).sum()).item() or 0.0
     overlap_sets = (
         df.filter(pl.col("is_overlap"))
-        .select((pl.col("sets") * pl.col("form_mult")).sum()).item() or 0.0
+        .select((pl.col("hard_sets") * pl.col("form_mult")).sum()).item() or 0.0
     )
 
     # --- per-set metrics (reference only) ----------------------------------
@@ -319,50 +409,41 @@ def get_specialization_trend(
         pl.when(pl.col("load_type").cast(pl.Utf8).is_in(_BOTH_LIMBS)).then(2.0).otherwise(1.0)
     )
     tonnage = per_set.select(
-        (pl.col("reps") * pl.col("weight_kg") * pl.col("form_mult") * load_mult).sum()
+        (pl.col("reps") * pl.col("weight_kg") * load_mult).sum()
     ).item() or 0.0
     loaded = pl.col("weight_kg").is_not_null() & pl.col("reps").is_not_null()
     load_type_unknown = int(per_set.filter(loaded & pl.col("load_type").is_null()).height)
     avg_rpe = per_set.select(pl.col("rpe").mean()).item()
 
     qualifies = qualifies_for_est_1rm("weight_kg", "reps")
-    est_1rm = per_set.filter(qualifies).select(epley_expr("weight_kg", "reps").max()).item()
+    # only primary-credit identities report a 1RM (overlap credit never does)
+    est_1rm = per_set.filter(qualifies & pl.col("primary")).select(
+        epley_expr("weight_kg", "reps").max()).item()
     unloaded = int(per_set.filter(pl.col("weight_kg").is_null()).height)
 
-    # --- trend across first vs second half of the window (by date) ---------
+    # --- trend across first vs second half of the window (by session order) ---
     # habit sessions are volume-only: direction and session counting use
     # training rows alone (NULL kind = legacy training)
     is_training = pl.col("kind").fill_null("training") != "habit"
     df = df.filter(is_training)
     per_set = per_set.filter(is_training)
-    sessions = df["date"].unique().sort().len()
+    sessions = df["sid"].n_unique()
     trend_direction = TrendDirection.unknown
     direction_basis: str | None = None
     identity_directions: dict[str, str] = {}
     if sessions >= 4:
-        dates = df["date"].unique().sort()
-        mid = dates.len() // 2
-        first_dates = set(dates.head(mid).to_list())
-        in_first = pl.col("date").is_in(list(first_dates))
+        # halves by training-session order: (date, created_at, id), first n//2 vs the rest
+        order = df.select("sid", "date", "created_at").unique(subset="sid").sort(
+            ["date", "created_at", "sid"])
+        first_ids = set(order["sid"].head(order.height // 2).to_list())
 
-        tf_est = per_set.filter(in_first & qualifies).select(
-            epley_expr("weight_kg", "reps").max()
-        ).item()
-        ts_est = per_set.filter(~in_first & qualifies).select(
-            epley_expr("weight_kg", "reps").max()
-        ).item()
-        if tf_est is not None and ts_est is not None:
-            # strength progress: est-1RM trend, ±2% band
-            if ts_est > tf_est * 1.02:
-                trend_direction = TrendDirection.up
-            elif ts_est < tf_est * 0.98:
-                trend_direction = TrendDirection.down
-            else:
-                trend_direction = TrendDirection.plateau
+        est_direction, _ = _est_1rm_direction(df, per_set, first_ids)
+        if est_direction is not None:
+            trend_direction = est_direction
             direction_basis = "est_1rm"
         else:
             trend_direction, identity_directions = _performance_direction(
-                df, muscle.value, first_dates)
+                df, first_ids)
             direction_basis = "performance"
 
     stalled = trend_direction in (TrendDirection.plateau, TrendDirection.down)

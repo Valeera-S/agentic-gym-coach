@@ -4,7 +4,8 @@ Nutrition ch02: every calorie number is a hypothesis, corrected only by
 WEEKLY-AVERAGE bodyweight trends. That needs a series, and the series is only
 meaningful like-for-like: a post-workout reading and a fasted morning reading
 differ by more than a week of real change. So every reading carries a
-condition, and `summarize` averages PER CONDITION — it never blends them.
+condition, and `summarize` averages PER CONDITION — it never blends them — over
+DAILY values (readings within a day are averaged first).
 
 Does not write profile.bodyweight_kg (profile writes need the user's confirmation).
 """
@@ -52,19 +53,33 @@ def list_readings(start: date, end: date) -> list[BodyweightReading]:
     return [_reading(r) for r in rows]
 
 
+class DailyConditionAverage(ConditionAverage):
+    """ConditionAverage that also reports the number of distinct DAYS behind
+    the mean (`readings` is the raw reading count)."""
+    days: int = 0
+
+
 def summarize(start: date, end: date) -> BodyweightSummary:
-    """Mean kg and reading count per condition over start..end inclusive."""
+    """Mean kg per condition over start..end inclusive, plus how many readings
+    and how many distinct days stand behind it.
+
+    The mean is of DAILY values: readings within one day are averaged first,
+    then the days (Nutrition ch02 — weekly averages of daily weights), so two
+    readings on one day weigh as one day, not two."""
     rows = get_duckdb().execute(
-        "SELECT condition, count(*), avg(weight_kg) FROM bodyweight_log "
-        "WHERE date BETWEEN ? AND ? GROUP BY condition ORDER BY condition",
+        "SELECT condition, sum(n), count(*), avg(day_mean) FROM ("
+        "  SELECT condition, date, count(*) AS n, avg(weight_kg) AS day_mean "
+        "  FROM bodyweight_log WHERE date BETWEEN ? AND ? GROUP BY condition, date) "
+        "GROUP BY condition ORDER BY condition",
         [start, end]).fetchall()
     return BodyweightSummary(start=start, end=end, averages=[
-        ConditionAverage(condition=WeighCondition(c), readings=n, mean_kg=round(float(m), 2))
-        for c, n, m in rows])
+        DailyConditionAverage(condition=WeighCondition(c), readings=int(n), days=int(d),
+                              mean_kg=round(float(m), 2))
+        for c, n, d, m in rows])
 
 
 def fasted_mean_7d(end: date) -> float | None:
-    """7-day mean of morning_fasted readings ending at `end`, or None."""
+    """7-day mean of the daily morning_fasted values ending at `end`, or None."""
     for a in summarize(window_start(end, 7), end).averages:
         if a.condition is WeighCondition.morning_fasted:
             return a.mean_kg
