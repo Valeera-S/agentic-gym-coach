@@ -241,7 +241,7 @@ def coach_profile_get() -> dict:
 
 @mcp.tool()
 def coach_profile_set(profile: dict) -> dict:
-    """Create/update the user profile (validated, versioned; goal changes audited). Echo it to the user after setting. An all-empty profile is refused."""
+    """Create/update the user profile (validated, versioned; goal changes audited). Echo it to the user after setting. An all-empty profile is refused. An unknown field (also inside goals / weekly_availability) is invalid_input, never dropped; `updated_at` from coach_profile_get is accepted and ignored."""
     return _run("profile_set", profile)
 
 

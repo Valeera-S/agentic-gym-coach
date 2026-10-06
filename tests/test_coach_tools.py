@@ -266,3 +266,76 @@ def test_a_missing_required_argument_is_invalid_input(cmd, args):
     with pytest.raises(ValueError) as exc:
         DISPATCH[cmd](args)
     assert error_payload(exc.value)["error"] == "invalid_input"
+
+
+# --- P50: unknown fields are rejected, not silently dropped ---------------------------
+
+def test_profile_set_rejects_an_unknown_field_and_names_it():
+    with pytest.raises(ValueError, match="bodyweight") as exc:
+        DISPATCH["profile_set"]({"days_per_week": 4, "bodyweight": 80})
+    assert error_payload(exc.value)["error"] == "invalid_input"
+    assert "bodyweight_kg" in str(exc.value)  # the allowed keys are listed
+    from skills.profile import get_profile
+    assert get_profile() is None  # nothing was written
+
+
+def test_profile_set_rejects_unknown_keys_inside_goals_and_availability():
+    with pytest.raises(ValueError, match="targets"):
+        DISPATCH["profile_set"]({"goals": [{"kind": "hypertrophy", "targets": ["quads"]}]})
+    with pytest.raises(ValueError, match="day"):
+        DISPATCH["profile_set"]({"weekly_availability": [{"weekday": "mon", "day": "x"}]})
+
+
+def test_profile_get_then_set_round_trip_keeps_working():
+    """The read-back carries updated_at (and every null field): sending it back must work."""
+    DISPATCH["profile_set"]({"days_per_week": 4, "goals": [{"kind": "hypertrophy"}]})
+    got = DISPATCH["profile_get"]({})
+    assert got["updated_at"]
+    got["days_per_week"] = 5
+    again = DISPATCH["profile_set"](got)
+    assert again["days_per_week"] == 5
+    assert again["updated_at"] != got["updated_at"]  # server-owned: the echoed value is ignored
+
+
+@pytest.mark.parametrize("cmd, args", [
+    ("trend", {"muscle": "quads", "window": 7}),
+    ("recovery", {"day": "2026-10-01"}),
+    ("sessions", {"count": 3}),
+    ("session_detail", {"id": "x"}),
+    ("session_delete", {"session_id": "x", "force": True}),
+    ("session_amend", {"session_id": "x", "date": "2026-10-01", "exercises": [], "nope": 1}),
+    ("safety_check", {"exercise": "Squat", "extra": 1}),
+    ("bodyweight_history", {"window": 7}),
+    ("bodyweight_log", {"date": "2026-10-01", "condition": "fed", "kg": 80}),
+    ("injuries_seed", {"location": "left_elbow", "status": "active", "severity": 3, "x": 1}),
+    ("memory_save", {"text": "a", "tag": "b"}),
+    ("memory_search", {"q": "a"}),
+    ("log_session", {"date": "2026-10-01", "exercises": [{"name": "Squat", "sets": 1}], "notes": "x"}),
+    ("snapshot", {"x": 1}),
+    ("intake_status", {"x": 1}),
+    ("injuries_list", {"x": 1}),
+    ("profile_get", {"x": 1}),
+])
+def test_every_handler_rejects_unknown_argument_keys(cmd, args):
+    with pytest.raises(ValueError, match="unknown") as exc:
+        DISPATCH[cmd](args)
+    assert error_payload(exc.value)["error"] == "invalid_input"
+
+
+def test_the_rejection_lists_the_allowed_keys():
+    with pytest.raises(ValueError) as exc:
+        DISPATCH["trend"]({"muscle": "quads", "window": 7})
+    msg = str(exc.value)
+    assert "'window'" in msg
+    assert "window_days" in msg and "end_date" in msg and "muscle" in msg
+
+
+def test_log_session_rejects_an_unknown_exercise_key():
+    with pytest.raises(ValueError, match="weigth"):
+        DISPATCH["log_session"]({"date": "2026-10-01", "exercises": [
+            {"name": "Squat", "sets": 1, "weigth": [100]}]})
+    assert DISPATCH["sessions"]({})["count"] == 0
+
+
+def test_known_keys_still_work_through_the_cli_wrapper():
+    assert DISPATCH["trend"]({"muscle": "quads", "window_days": 7})["window_days"] == 7

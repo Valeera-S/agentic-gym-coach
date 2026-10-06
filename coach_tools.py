@@ -97,6 +97,35 @@ def _str_list(args: dict, key: str) -> list[str] | None:
     return v
 
 
+def _check_keys(data: dict, allowed, where: str = "argument", ignore=()) -> None:
+    """Reject keys the tool does not accept (P50): an unknown key was silently
+    dropped by the models and ignored by the readers, so `{"window": 7}` ran
+    with the default window and a typo in a profile field lost the value."""
+    unknown = sorted(str(k) for k in data if k not in allowed and k not in ignore)
+    if unknown:
+        raise InputError(f"unknown {where} key(s): {', '.join(repr(k) for k in unknown)}; "
+                         f"allowed: {', '.join(sorted(allowed)) or '(none)'}")
+
+
+def _accepts(*keys, model: str | None = None):
+    """Decorator for a handler: its argument keys must be among `keys`, or the
+    input fields of the named pydantic model (`model="SessionInput"`, resolved
+    lazily so the CLI cold start stays cheap). THE single arg-key check shared
+    by every handler (P50)."""
+    def deco(fn):
+        @functools.wraps(fn)
+        def run(args: dict):
+            allowed = set(keys)
+            if model is not None:
+                import importlib
+                mod, _, cls = model.rpartition(".")
+                allowed |= set(getattr(importlib.import_module(mod or "models"), cls).model_fields)
+            _check_keys(args, allowed)
+            return fn(args)
+        return run
+    return deco
+
+
 def _int_arg(args: dict, key: str, default: int, *,
              minimum: int | None = None, maximum: int | None = None) -> int:
     """Strict integer argument: rejects "28" (string), 3.7 (float), bools —
@@ -123,24 +152,33 @@ def error_payload(e: Exception) -> dict:
     return {"error": code, "exception": type(e).__name__, "detail": str(e)}
 
 
+@_accepts(model="SessionInput")
 def cmd_log_session(args: dict):
-    from models import SessionInput
+    from models import ExerciseModel, SessionInput
     from skills.session_logger import log_session
+    exercises = args.get("exercises")
+    if isinstance(exercises, list):  # a typo'd per-exercise key (weigth) is not dropped (P50)
+        for i, ex in enumerate(exercises):
+            if isinstance(ex, dict):
+                _check_keys(ex, set(ExerciseModel.model_fields), f"exercises[{i}]")
     inp = SessionInput.model_validate(args)
     return log_session(inp).model_dump(mode="json")
 
 
+@_accepts("exercise")
 def cmd_safety_check(args: dict):
     from skills.safety_gate import check_exercise_safety
     return check_exercise_safety(_require(args, "exercise", str)).model_dump(mode="json")
 
 
+@_accepts("date")
 def cmd_recovery(args: dict):
     from skills.recovery import compute_recovery_score
     d = _parse_date(args.get("date")) or date.today()
     return compute_recovery_score(d).model_dump(mode="json")
 
 
+@_accepts("muscle", "window_days", "end_date")
 def cmd_trend(args: dict):
     from models import MuscleGroup
     from skills.trend_analysis import get_specialization_trend
@@ -153,16 +191,19 @@ def cmd_trend(args: dict):
     ).model_dump(mode="json")
 
 
+@_accepts()
 def cmd_snapshot(args: dict):
     from skills.snapshot import generate_phase_snapshot
     return generate_phase_snapshot().model_dump(mode="json")
 
 
+@_accepts()
 def cmd_intake_status(args: dict):
     from skills.intake import assess_intake
     return assess_intake().model_dump(mode="json")
 
 
+@_accepts("limit")
 def cmd_sessions(args: dict):
     from skills.sessions import list_sessions
     limit = _int_arg(args, "limit", DEFAULT_SESSIONS_LIMIT, minimum=1, maximum=MAX_LIMIT)
@@ -170,6 +211,7 @@ def cmd_sessions(args: dict):
     return {"sessions": rows, "count": len(rows)}
 
 
+@_accepts("session_id", "date")
 def cmd_session_detail(args: dict):
     from skills.sessions import get_session_detail
     session_id, on_date = args.get("session_id"), args.get("date")
@@ -179,6 +221,7 @@ def cmd_session_detail(args: dict):
     return {"sessions": [d.model_dump(mode="json") for d in details]}
 
 
+@_accepts(model="SessionAmendInput")
 def cmd_session_amend(args: dict):
     from models import SessionAmendInput
     from skills.sessions import amend_session
@@ -186,11 +229,13 @@ def cmd_session_amend(args: dict):
     return amend_session(data).model_dump(mode="json")
 
 
+@_accepts("session_id")
 def cmd_session_delete(args: dict):
     from skills.sessions import delete_session
     return delete_session(_require(args, "session_id")).model_dump(mode="json")
 
 
+@_accepts(model="models.bodyweight.BodyweightInput")
 def cmd_bodyweight_log(args: dict):
     from models.bodyweight import BodyweightInput
     from skills.bodyweight import log_bodyweight
@@ -198,6 +243,7 @@ def cmd_bodyweight_log(args: dict):
     return log_bodyweight(inp).model_dump(mode="json")
 
 
+@_accepts("window_days", "end_date")
 def cmd_bodyweight_history(args: dict):
     from skills.bodyweight import bodyweight_history
     return bodyweight_history(
@@ -206,12 +252,14 @@ def cmd_bodyweight_history(args: dict):
     ).model_dump(mode="json")
 
 
+@_accepts()
 def cmd_injuries_list(args: dict):
     from skills.injuries import list_injuries
     injuries = [i.model_dump(mode="json") for i in list_injuries()]
     return {"injuries": injuries, "count": len(injuries)}
 
 
+@_accepts("location", "status", "severity", "contraindicated_exercises", "safe_alternatives")
 def cmd_injuries_seed(args: dict):
     from skills.injuries import seed_injury
     res = seed_injury(
@@ -230,15 +278,27 @@ def cmd_injuries_seed(args: dict):
     }
 
 
+@_accepts()
 def cmd_profile_get(args: dict):
     from skills.profile import get_profile
     p = get_profile()
     return p.model_dump(mode="json") if p else {"profile": None}
 
 
+@_accepts(model="UserProfile")
 def cmd_profile_set(args: dict):
     from models import UserProfile
+    from models import AvailabilityWindow, Goal
     from skills.profile import set_profile
+    # `updated_at` is what coach_profile_get returns but the server owns it:
+    # accepted and ignored, so a get -> edit -> set round trip keeps working.
+    args = {k: v for k, v in args.items() if k != "updated_at"}
+    for key, model in (("goals", Goal), ("weekly_availability", AvailabilityWindow)):
+        items = args.get(key)
+        if isinstance(items, list):
+            for i, item in enumerate(items):
+                if isinstance(item, dict):
+                    _check_keys(item, set(model.model_fields), f"{key}[{i}]")
     profile = UserProfile.model_validate(args)
     if profile == UserProfile():
         # An all-default profile would silently disarm the intake's empty-profile
@@ -248,6 +308,7 @@ def cmd_profile_set(args: dict):
     return set_profile(profile).model_dump(mode="json")
 
 
+@_accepts("text", "kind", "tags")
 def cmd_memory_save(args: dict):
     from models import NoteKind
     from skills.memory import add_note
@@ -259,6 +320,7 @@ def cmd_memory_save(args: dict):
     return note.model_dump(mode="json")
 
 
+@_accepts("query", "tags", "limit")
 def cmd_memory_search(args: dict):
     from skills.memory import search_notes
     query = args.get("query")
