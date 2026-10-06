@@ -56,3 +56,89 @@ def test_empty_goals_to_real_goal_is_audited():
     n = get_duckdb().execute(
         "SELECT count(*) FROM decision_log WHERE event_type='goal_change'").fetchone()[0]
     assert n == 1
+
+
+# --- P51: the goal audit compares full goal content and describes the change exactly ----
+
+def _audit_rows():
+    return [r[0] for r in get_duckdb().execute(
+        "SELECT trigger_signal FROM decision_log WHERE event_type='goal_change' "
+        "ORDER BY created_at, id").fetchall()]
+
+
+def _G(**kw):
+    kw.setdefault("kind", GoalKind.hypertrophy)
+    return Goal(**kw)
+
+
+def _sets(before, after):
+    set_profile(UserProfile(goals=before))
+    get_duckdb().execute("DELETE FROM decision_log")  # only the before -> after audit counts
+    set_profile(UserProfile(goals=after))
+    return _audit_rows()
+
+
+def test_physique_target_change_is_audited_with_old_and_new():
+    from models import PhysiqueTarget
+    rows = _sets([_G(kind=GoalKind.fat_loss, physique_target=PhysiqueTarget.ripped)],
+                 [_G(kind=GoalKind.fat_loss, physique_target=PhysiqueTarget.athletic)])
+    assert len(rows) == 1
+    assert "physique_target" in rows[0] and "ripped" in rows[0] and "athletic" in rows[0]
+    assert "removed" not in rows[0] and "added" not in rows[0]
+
+
+def test_deadline_metric_and_notes_changes_are_audited():
+    from datetime import date
+    for field, old, new in (("deadline", date(2026, 12, 1), date(2027, 1, 1)),
+                            ("metric", "first pull-up", "5 pull-ups"),
+                            ("notes", "a", "b")):
+        get_duckdb().execute("DELETE FROM decision_log")
+        rows = _sets([_G(**{field: old})], [_G(**{field: new})])
+        assert len(rows) == 1, field
+        assert field in rows[0] and str(old) in rows[0] and str(new) in rows[0]
+
+
+def test_target_muscles_change_names_the_field_not_a_phantom_swap():
+    rows = _sets([_G(target_muscles=[MuscleGroup.quads])],
+                 [_G(target_muscles=[MuscleGroup.quads, MuscleGroup.glutes])])
+    assert len(rows) == 1
+    assert "target_muscles" in rows[0] and "glutes" in rows[0]
+    assert "removed=['hypertrophy'] added=['hypertrophy']" not in rows[0]
+
+
+def test_adding_a_duplicate_goal_is_audited_as_an_addition():
+    rows = _sets([_G()], [_G(), _G()])
+    assert len(rows) == 1
+    assert "added" in rows[0] and "hypertrophy" in rows[0]
+    assert "added=none" not in rows[0]
+
+
+def test_removing_a_duplicate_goal_is_audited():
+    rows = _sets([_G(), _G()], [_G()])
+    assert len(rows) == 1 and "removed" in rows[0]
+
+
+def test_pure_reordering_is_not_a_change():
+    a = _G(kind=GoalKind.strength)
+    b = _G(target_muscles=[MuscleGroup.quads, MuscleGroup.glutes])
+    assert _sets([a, b], [b, a]) == []
+    # target muscles are an unordered set too
+    assert _sets([_G(target_muscles=[MuscleGroup.quads, MuscleGroup.glutes])],
+                 [_G(target_muscles=[MuscleGroup.glutes, MuscleGroup.quads])]) == []
+
+
+def test_adding_and_removing_goals_are_described_precisely():
+    rows = _sets([_G(kind=GoalKind.strength)], [_G(kind=GoalKind.fat_loss)])
+    assert len(rows) == 1
+    assert "removed=['strength']" in rows[0] and "added=['fat_loss']" in rows[0]
+
+
+def test_several_goals_of_one_kind_changing_at_once_does_not_crash():
+    from models import PhysiqueTarget
+    rows = _sets([_G(), _G(physique_target=PhysiqueTarget.ripped), _G(notes="x")],
+                 [_G(metric="m"), _G(physique_target=PhysiqueTarget.bulky), _G(notes="y")])
+    assert len(rows) == 1 and "changed" in rows[0]
+
+
+def test_nothing_changed_writes_nothing():
+    assert _sets([_G(notes="x")], [_G(notes="x")]) == []

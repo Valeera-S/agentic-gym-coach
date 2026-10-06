@@ -58,6 +58,6 @@ Volume currency = effective hard sets per muscle per week: sets × form_mult (fo
 - The session-gap staleness threshold is a labeled heuristic (not book-sourced), configurable only in skills/snapshot.py (REASSESSMENT_GAP_WEEKS).
 - Tier 3 memory writes require an explicit user command; never auto-write.
 - Cite retrieved values; missing data = "I don't have that data." Never fabricate.
-- Every plan modification (incl. goal changes) lands in decision_log.
+- Every plan modification (incl. goal changes) lands in decision_log. Goal-change rule (`skills/profile.py`): goals are compared on their full content (kind, physique_target, target_muscles, metric, deadline, notes) as a multiset; any difference writes one `goal_change` entry (goals added / removed, and for a goal of the same kind its changed fields from -> to), no difference writes none, and pure reordering (of goals or of a goal's target_muscles) is no change. The first profile ever stored has no prior goals, so it writes no entry.
 - Full offline operation (no cloud except optional vision API for visual_delta).
 - Tests never touch production data (conftest.py env redirect). Single-process pytest.
