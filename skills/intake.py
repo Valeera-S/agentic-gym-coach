@@ -26,12 +26,15 @@ from typing import Any
 
 from models import (
     INTAKE_CHECKLIST,
+    INTAKE_ROUND_TITLES,
+    DomainProgress,
     FieldReport,
     FieldStatus,
     GateCondition,
     GateDomain,
     IntakeField,
     IntakeReport,
+    NextRound,
     UserProfile,
 )
 
@@ -86,10 +89,9 @@ def _stored_value(field: IntakeField, profile: UserProfile | None,
     return value, _is_present(value)
 
 
-def _blocks(field: IntakeField, profile: UserProfile | None) -> bool:
-    """Does this field, if missing, hold its gate open for THIS profile?"""
-    if not field.blocks_gate:
-        return False
+def _applies(field: IntakeField, profile: UserProfile | None) -> bool:
+    """Does this field's gate_condition hold for THIS profile? Independent of
+    whether the field is collected (progress totals need it for both)."""
     cond = field.gate_condition
     if cond is GateCondition.unless_male:
         return profile is None or profile.sex is None or profile.sex.value != "male"
@@ -98,6 +100,41 @@ def _blocks(field: IntakeField, profile: UserProfile | None) -> bool:
             g.kind.value == "fat_loss" or (g.physique_target and g.physique_target.value == "ripped")
             for g in profile.goals)
     return True
+
+
+def _blocks(field: IntakeField, profile: UserProfile | None) -> bool:
+    """Does this field, if missing, hold its gate open for THIS profile?"""
+    return field.blocks_gate and _applies(field, profile)
+
+
+def _gates(field: IntakeField, domain: str) -> bool:
+    return field.gates in (GateDomain(domain), GateDomain.both)
+
+
+def _progress(reports: list[FieldReport], profile: UserProfile | None) -> dict[str, DomainProgress]:
+    """done/total per domain over the fields that gate it right now: blocking
+    fields whose gate_condition applies to the stored profile."""
+    out: dict[str, DomainProgress] = {}
+    for domain in ("training", "nutrition"):
+        counted = [r for r in reports if _blocks(r, profile) and _gates(r, domain)]
+        out[domain] = DomainProgress(
+            done=sum(r.status is FieldStatus.collected for r in counted), total=len(counted))
+    return out
+
+
+def _next_round(reports: list[FieldReport]) -> tuple[int, NextRound | None]:
+    """(rounds_total, lowest guided round still pending). A round is done when
+    every field in it that blocks NOW is collected; a pending round lists all its
+    missing fields (blocking or not), a done round is never offered — so a user
+    with no injury rows is not held in round 3 by the non-blocking injuries field."""
+    rounds = sorted({r.round for r in reports if r.round is not None})
+    for rnd in rounds:
+        members = [r for r in reports if r.round == rnd]
+        if any(r.blocks_now for r in members):
+            return len(rounds), NextRound(
+                round=rnd, title=INTAKE_ROUND_TITLES.get(rnd, ""),
+                fields=[r.name for r in members if r.status is FieldStatus.missing])
+    return len(rounds), None
 
 
 def assess_intake(today: date | None = None) -> IntakeReport:
@@ -126,6 +163,7 @@ def assess_intake(today: date | None = None) -> IntakeReport:
         if r.gates in (GateDomain.nutrition, GateDomain.both):
             missing_by_gate["nutrition"].append(r.name)
 
+    rounds_total, next_round = _next_round(reports)
     return IntakeReport(
         fields=reports,
         weeks_since_last_session=gap.weeks_since_last_session,
@@ -133,4 +171,7 @@ def assess_intake(today: date | None = None) -> IntakeReport:
         nutrition_ready=not missing_by_gate["nutrition"],
         missing=[r.name for r in reports if r.status is FieldStatus.missing],
         missing_by_gate=missing_by_gate,
+        progress=_progress(reports, profile),
+        rounds_total=rounds_total,
+        next_round=next_round,
     )

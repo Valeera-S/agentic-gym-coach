@@ -8,7 +8,10 @@ import pytest
 
 from models import (
     INTAKE_CHECKLIST,
+    INTAKE_ROUND_TITLES,
     ActivityLevel,
+    EquipmentAccess,
+    GateDomain,
     AvailabilityWindow,
     ExerciseModel,
     FieldStatus,
@@ -329,3 +332,131 @@ def test_gate_conditions_are_declared_in_the_checklist_notes():
     for name, word in (("pcos", "male"), ("oligomenorrhea", "male"), ("bodyfat_pct", "fat_loss")):
         assert by_name[name].gate_condition is not GateCondition.always, name
         assert word in by_name[name].note, name
+
+
+# --- guided rounds, progress, options ----------------------------------------------------
+
+def _training_blockers() -> list:
+    return [f for f in INTAKE_CHECKLIST
+            if f.blocks_gate and f.gates in (GateDomain.training, GateDomain.both)]
+
+
+def test_empty_profile_points_at_round_one_with_zero_progress():
+    report = assess_intake(today=TODAY)
+    assert report.rounds_total == 3
+    assert report.next_round is not None and report.next_round.round == 1
+    assert report.next_round.fields == ["goals", "training_age", "days_per_week", "session_length_min"]
+    assert report.progress["training"].done == 0
+    assert report.progress["training"].total == 9
+    assert report.progress["nutrition"].done == 0
+    assert report.progress["nutrition"].total == len(report.missing_by_gate["nutrition"])
+
+
+def test_partial_profile_advances_to_round_two():
+    set_profile(UserProfile(
+        goals=[Goal(kind=GoalKind.strength)], training_age=TrainingAge.novice,
+        days_per_week=3, session_length_min=45))
+    report = assess_intake(today=TODAY)
+    assert report.next_round.round == 2
+    assert report.next_round.fields == ["life_stress", "concurrent_sports", "equipment_access"]
+    assert report.progress["training"].done == 4 and report.progress["training"].total == 9
+
+
+def test_round_with_only_nonblocking_gaps_is_done():
+    """Everything training-gating is collected but no injury rows: injuries stays
+    in `missing` (non-blocking), yet no round is pending and the gate is open."""
+    set_profile(_training_only_profile())
+    report = assess_intake(today=TODAY)
+    assert "injuries" in report.missing
+    assert report.training_ready is True
+    assert report.next_round is None
+    assert report.progress["training"].done == report.progress["training"].total == 9
+
+
+def test_pending_round_lists_nonblocking_fields_too():
+    set_profile(_training_only_profile().model_copy(update={"rpe_calibrated": None}))
+    report = assess_intake(today=TODAY)
+    assert report.next_round.round == 3
+    assert report.next_round.fields == ["injuries", "rpe_calibrated"]
+
+
+def test_cutting_goal_changes_nutrition_total():
+    set_profile(_male_complete(goals=[Goal(kind=GoalKind.strength)]))
+    base = assess_intake(today=TODAY).progress["nutrition"]
+    set_profile(_male_complete(goals=[Goal(kind=GoalKind.hypertrophy,
+                                           physique_target=PhysiqueTarget.ripped)]))
+    cut = assess_intake(today=TODAY).progress["nutrition"]
+    assert cut.total == base.total + 1
+    assert cut.done == base.done  # bodyfat missing in both
+    set_profile(_male_complete(goals=[Goal(kind=GoalKind.fat_loss)], bodyfat_pct=15.0))
+    after = assess_intake(today=TODAY).progress["nutrition"]
+    assert after.total == cut.total
+    assert after.done == cut.done + 1  # bodyfat now collected and counted
+
+
+def test_every_training_blocker_has_a_guided_round():
+    for f in _training_blockers():
+        assert f.round in (1, 2, 3), f.name
+    for name in ("weekly_availability", "exercise_likes", "exercise_dislikes"):
+        assert next(f for f in INTAKE_CHECKLIST if f.name == name).round is None
+    assert all(f.round is None for f in INTAKE_CHECKLIST if f.gates is GateDomain.nutrition)
+
+
+def test_round_assignment_is_exactly_the_agreed_plan():
+    plan = {1: ["goals", "training_age", "days_per_week", "session_length_min"],
+            2: ["life_stress", "concurrent_sports", "equipment_access"],
+            3: ["injuries", "rpe_calibrated", "has_tested_maxes"]}
+    for rnd, names in plan.items():
+        assert sorted(f.name for f in INTAKE_CHECKLIST if f.round == rnd) == sorted(names)
+    assert set(INTAKE_ROUND_TITLES) == {1, 2, 3}
+
+
+def test_every_rounded_field_has_a_question():
+    for f in INTAKE_CHECKLIST:
+        if f.round is not None:
+            assert f.question.strip().endswith("?"), f.name
+
+
+_OPTION_ENUMS = {
+    "physique_target": PhysiqueTarget, "training_age": TrainingAge,
+    "life_stress": StressLevel, "equipment_access": EquipmentAccess,
+}
+
+
+def test_every_option_value_is_a_real_enum_value():
+    seen = 0
+    for f in INTAKE_CHECKLIST:
+        if not f.options:
+            continue
+        key = f.options_key or f.name
+        values = [o.value for o in f.options]
+        assert len(values) == len(set(values)), f.name
+        if key in _OPTION_ENUMS:
+            # every enum value is offered: no choice is hidden from the user
+            assert set(values) == {e.value for e in _OPTION_ENUMS[key]}, f.name
+        else:  # bool-typed profile field
+            assert key in UserProfile.model_fields and set(values) == {"true", "false"}, f.name
+        seen += 1
+    assert seen >= 5
+
+
+def test_every_option_is_grounded_and_explains_its_consequence():
+    for f in INTAKE_CHECKLIST:
+        for o in f.options:
+            assert o.means.strip() and o.effect.strip(), (f.name, o.value)
+            assert (o.source.startswith("HEURISTIC")
+                    or re.search(r"(Training|Nutrition) ch0[1-9]", o.source)), (f.name, o.value)
+
+
+def test_ripped_option_says_it_switches_on_cut_rules():
+    goals = next(f for f in INTAKE_CHECKLIST if f.name == "goals")
+    assert goals.options_key == "physique_target"
+    ripped = next(o for o in goals.options if o.value == "ripped")
+    assert "cut" in ripped.effect.lower() and "body" in ripped.effect.lower()
+
+
+def test_report_fields_carry_round_question_and_options():
+    payload = json.loads(assess_intake(today=TODAY).model_dump_json())
+    ta = next(f for f in payload["fields"] if f["name"] == "training_age")
+    assert ta["round"] == 1 and ta["question"] and len(ta["options"]) == 3
+    assert {"progress", "rounds_total", "next_round"} <= payload.keys()

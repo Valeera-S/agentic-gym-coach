@@ -136,7 +136,7 @@ def coach_snapshot() -> dict:
 
 @mcp.tool()
 def coach_intake_status() -> dict:
-    """Run the standardized intake scan: collected vs missing bucket-list fields (each citing its book source), per-domain readiness (training/nutrition soft gates), and weeks since the last logged training session (habit sessions excluded). Read-only — ask the user only for what's missing."""
+    """Run the standardized intake scan: collected vs missing bucket-list fields (each citing its book source), per-domain readiness (training/nutrition soft gates), and weeks since the last logged training session (habit sessions excluded). Also returns guided-round state: `progress` (done/total per domain), `rounds_total`, `next_round` (the round to ask next and its missing fields; null when every round is done), and per field its `round`, plain-language `question` and `options` (each with `means`, `effect`, `source`; show the effect before the user chooses). Read-only — ask the user only for what's missing."""
     return _run("intake_status", {})
 
 

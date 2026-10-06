@@ -7,10 +7,11 @@ every exercise suggestion against your injuries, and answers training +
 nutrition questions from vendored professional sources — never invented
 science.
 
-**First conversation:** the intake scan reports what's missing; it asks your
-goals (hypertrophy, strength, fat loss, …), physique vision, training age,
-schedule windows, equipment, and injuries — then coaches toward YOUR
-profile. Same flow when you return after months away: what's stored gets
+**First conversation:** the coach introduces what it can do, then runs a
+short intake in 3 rounds (goal and starting point, your week, calibration and
+safety) with visible progress. Where a choice changes what the coach does
+(e.g. a "ripped" physique target switches on cut rules), the options spell
+out the consequence before you pick. It then coaches toward YOUR profile. Same flow when you return after months away: what's stored gets
 cited and re-confirmed, not re-collecting from scratch.
 
 ```text
@@ -25,6 +26,39 @@ You:  How many calories to get ripped?           → nutrition pyramid ch02
 You:  My bench is stuck.                         → plateau flowchart, free wins first
 You:  Remember I hate barbell rows.              → long-term memory (manual only)
 ```
+
+## What the coach can do
+
+Just talk to it; it picks the tool. Each tool is named once, with something
+you could say.
+
+**Logging**
+- `coach_log_session`: "Log today: Incline Bench 3x8 @ RPE 8, Lateral Raise 4x12 @ RPE 9." Pounds or kilos.
+- `coach_sessions` and `coach_session_detail`: "Show my last 5 sessions", "show me Tuesday's session exactly as I entered it."
+
+**Analysis**
+- `coach_trend`: "How are my side delts progressing?" Hard sets, avg RPE, est 1RM, trend direction, stall flag.
+- `coach_snapshot`: "Where am I in my training block?" A 4-week anchor with time since the last deload and how long you were away.
+- `coach_recovery`: "Am I recovered enough to push today?" A 0-100 heuristic score.
+- `coach_doctrine`: "What does the book say about plateaus?" The two vendored books, on demand.
+
+**Corrections**
+- `coach_session_amend`: "Fix Tuesday: bench was 3x6, not 3x8."
+- `coach_session_delete`: "Delete the duplicate session on the 4th." Both are audited and restorable.
+
+**Safety**
+- `coach_safety_check`: "Should I do skull crushers tonight?" Deterministic check against your injuries; it offers alternatives.
+- `coach_injuries_list` and `coach_injuries_seed`: "What injuries do you have on file?", "my left elbow hurts on extensions."
+
+**Bodyweight**
+- `coach_bodyweight_log`: "Weighed 81.2 kg this morning, fasted."
+- `coach_bodyweight_history`: "Show my weight trend."
+- `coach_bodyweight_amend` and `coach_bodyweight_delete`: "That reading was 80.2, not 82.0", "delete yesterday's reading."
+
+**Memory and profile**
+- `coach_intake_status`: "What do you still need to know about me?" The intake in 3 short rounds, with progress shown.
+- `coach_profile_get` and `coach_profile_set`: "What do you have on file for me?", "I can train 4 days a week now."
+- `coach_memory_save` and `coach_memory_search`: "Remember I hate barbell rows" (saved only when you say so), "what did I say about rows?"
 
 ## How it works
 
@@ -83,7 +117,7 @@ python scripts/ingest_log.py --reset   # optional: import historical log.md
 ## Running tests
 
 ```bash
-python -m pytest -q          # 673 tests
+python -m pytest -q          # 1286 tests
 python -m pytest -m slow -q  # 3 perf guards on 10K-row synthetic sets
 ```
 

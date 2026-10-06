@@ -27,6 +27,21 @@ Gates are soft:
 they stop the coach from *volunteering* plans, not from answering.
 _Avoid_: blocking requirement, hard gate
 
+**Intake round**:
+One of the three guided steps of the training intake (1 goal & starting point,
+2 your week, 3 calibration & safety), declared as data on the checklist fields
+(`IntakeField.round`). The coach asks one round at a time, echoes and stores the
+answers, then re-scans. A round is done when every field in it that blocks a gate
+is collected, so non-blocking gaps (no injury rows) never hold it open.
+_Avoid_: stage, phase (a training phase is a different thing), wizard step
+
+**Progress**:
+`done/total` per domain in the intake report: the blocking fields that gate the
+domain right now (a field with a gate condition counts only when it applies —
+bodyfat % only while cutting) and how many of them are collected. Shown to the
+user as "Round 1/3 · training 0/9".
+_Avoid_: completion percentage, score
+
 **Provisional plan**:
 A plan produced despite a closed gate, on explicit user insistence, which
 opens by naming every missing field and the limitation each imposes.

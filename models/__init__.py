@@ -17,12 +17,16 @@ from .exercise_catalog import SECONDARY_OVERLAP, canonicalize, classify
 from .injury import InjurySeedResult, InjuryStatus, SafetyResult
 from .intake import (
     INTAKE_CHECKLIST,
+    INTAKE_ROUND_TITLES,
     FieldReport,
     FieldStatus,
     GateCondition,
     GateDomain,
+    DomainProgress,
     IntakeField,
+    IntakeOption,
     IntakeReport,
+    NextRound,
 )
 from .profile import (
     ActivityLevel,
@@ -106,6 +110,10 @@ __all__ = [
     "GateCondition",
     "GateDomain",
     "INTAKE_CHECKLIST",
+    "INTAKE_ROUND_TITLES",
+    "DomainProgress",
+    "IntakeOption",
+    "NextRound",
     "IntakeField",
     "IntakeReport",
     "AvailabilityWindow",
