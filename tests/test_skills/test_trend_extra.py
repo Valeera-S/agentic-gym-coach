@@ -71,7 +71,17 @@ def test_negative_window_returns_empty_report():
     assert r.sessions_in_window == 0
 
 
-def test_form_discount_applies_to_tonnage_and_sets():
+def test_low_form_tonnage_is_total_external_load_not_discounted():
+    # P48: the 50% form discount is for effective hard sets only
+    log_session(SessionInput(date=T - timedelta(days=1), exercises=[ExerciseModel(
+        name="Dumbbell Curl", sets=2, reps=[10, 10], weight_kg=[20.0, 20.0],
+        form_quality=2, load_type="per_hand")]))
+    r = get_specialization_trend(MuscleGroup.biceps, window_days=28, end_date=T)
+    assert r.detail["tonnage_kg"] == pytest.approx(800.0)   # 2 x 10 x 20 x 2 hands
+    assert r.effective_volume == pytest.approx(1.0)          # sets still discounted
+
+
+def test_form_discount_applies_to_sets():
     _log(T - timedelta(days=1), [100.0, 100.0, 100.0], reps=5)
     # make one set low-quality by rewriting form via a second low-form exercise
     exs = [ExerciseModel(name="Squat", sets=2, reps=[5, 5], rpe=[8, 8],

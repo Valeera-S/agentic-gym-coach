@@ -11,7 +11,8 @@ for equal hypertrophy). Rules:
   - stored exercise names are resolved through the catalog first, so a row
     stored under a name that is now an alias (or a pre-split legacy name)
     still credits its identity's muscles
-  - form_quality < 3 discounts a set 50% (SPEC §1.3)
+  - form_quality < 3 discounts a set 50% (SPEC §1.3) — effective hard sets only,
+    never tonnage (P48)
   - a RECORDED 0-rep set is not a hard set (P55); an unrecorded rep count still is
   - bodyweight/unloaded sets are hard sets (count 1.0 each); tonnage is
     reported in `detail` for reference only, as total external load:
@@ -332,7 +333,7 @@ def get_specialization_trend(
         pl.when(pl.col("load_type").cast(pl.Utf8).is_in(_BOTH_LIMBS)).then(2.0).otherwise(1.0)
     )
     tonnage = per_set.select(
-        (pl.col("reps") * pl.col("weight_kg") * pl.col("form_mult") * load_mult).sum()
+        (pl.col("reps") * pl.col("weight_kg") * load_mult).sum()
     ).item() or 0.0
     loaded = pl.col("weight_kg").is_not_null() & pl.col("reps").is_not_null()
     load_type_unknown = int(per_set.filter(loaded & pl.col("load_type").is_null()).height)
