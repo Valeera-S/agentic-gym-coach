@@ -142,6 +142,7 @@ def coach_session_detail(session_id: str | None = None, date: str | None = None)
     its identity and raw_name as typed, sets/reps/rpe,
     weight_kg plus the user's own numbers (weight_as_entered + unit_as_entered), load_type
     (load_type_unknown when not recorded), muscle_group + muscle_source, and needs_review with the reason.
+    Every stored entry is listed: a nameless one (older rows) has name null and needs_review.
     Unknown id or date -> invalid_input.
     """
     return _run("session_detail", {"session_id": session_id, "date": date})
@@ -163,7 +164,8 @@ def coach_session_amend(session_id: str, date: str, exercises: list[dict],
     Exercises take the logging fields (name, sets, reps, rpe, weight_kg | weight + unit, load_type,
     tempo, form_quality, pain_flag, notes, muscle_group, confirm_muscle) plus EXACTLY ONE of
     `index` (the stored exercise it restates/edits, from coach_session_detail) or `new: true`;
-    unreferenced stored exercises are removed. Read-back-only keys (raw_name, muscle_source,
+    unreferenced stored exercises are removed and every one is listed in the reply's
+    `removed_exercises` (index, name, ...; nameless older entries included). Read-back-only keys (raw_name, muscle_source,
     entered_weight, ...) -> invalid_input. An exercise restated unchanged keeps what was recorded
     (raw name, weight + unit, load_type, muscle provenance; an older entry whose name the catalog
     now maps to another identity is canonicalized, with that name kept as its raw_name). Omit

@@ -293,6 +293,19 @@ class SessionAmendInput(BaseModel):
         return self
 
 
+class RemovedExercise(BaseModel):
+    """A stored exercise an amend did not carry over (amend: reported, never silent).
+
+    `name` is None for the nameless entries some older rows hold (an entry
+    that is NULL altogether reports only its index)."""
+
+    index: int                       # its position in the session before the amend
+    name: str | None = None
+    raw_name: str | None = None
+    muscle_group: str | None = None
+    sets: int | None = None
+
+
 class SessionChange(BaseModel):
     """Return of skills.sessions.amend_session() / delete_session() / restore_snapshot()."""
 
@@ -300,6 +313,9 @@ class SessionChange(BaseModel):
     session_id: UUID
     audit_id: UUID                   # decision_log row holding the pre-change snapshot
     anomaly_flags: list[AnomalyFlag] = Field(default_factory=list)  # amend: as a fresh log
+    # amend: every stored exercise the amend left out (its `index` was not
+    # restated), so none disappears unreported; the full rows stay in the audit entry
+    removed_exercises: list[RemovedExercise] = Field(default_factory=list)
     # amend: the session-level values now stored (kept, changed or cleared),
     # so the caller can tell the user exactly what the session looks like
     phase: str | None = None
@@ -332,7 +348,8 @@ class ExerciseDetail(BaseModel):
     """
 
     index: int | None = None                 # position in the stored session (amend handle)
-    name: str                                # canonical identity (or the raw name if unmapped)
+    name: str | None                         # canonical identity (or the raw name if unmapped);
+    #                                          None for a nameless entry some older rows hold
     raw_name: str | None = None              # what the caller typed
     muscle_group: str | None = None          # stored primary
     muscle_source: str | None = None         # catalog | keyword | caller | unclassified

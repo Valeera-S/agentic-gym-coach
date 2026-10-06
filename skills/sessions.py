@@ -40,6 +40,7 @@ from models import (
     MuscleGroup,
     MuscleSource,
     PhaseType,
+    RemovedExercise,
     SessionAmendInput,
     SessionChange,
     SessionDetail,
@@ -79,7 +80,7 @@ def _needs_review(name: str | None, source: str | None) -> bool:
     # page's distinct pairs: a smaller LRU is evicted in full by one cyclic
     # scan of a large page and then never hits
     if name is None:
-        return True  # not producible by the logger; never assume it is confirmed
+        return True  # a nameless entry (older rows only); never assume it is confirmed
     known = resolve_name(name) is not None
     if source is None:
         return not known
@@ -92,14 +93,22 @@ def _needs_review(name: str | None, source: str | None) -> bool:
     return True  # a source this version does not know: never assume it is confirmed
 
 
-def _exercise(e: dict, index: int | None = None) -> ExerciseDetail:
+def _exercise(e: dict | None, index: int | None = None) -> ExerciseDetail:
+    """One stored exercise as ExerciseDetail. A nameless entry (some older rows
+    hold them, and NULL entries) is shown too — with its index, as needing
+    review — so the caller can see and reference everything stored."""
+    e = e or {}
     source = e.get("muscle_source")
-    flag = _needs_review(e["name"], source)
-    detail = _review_text(e["name"], e.get("muscle_group"), source) if flag else None
+    flag = _needs_review(e.get("name"), source)
+    if e.get("name") is None:
+        detail = (f"exercise entry {index} has no name (an older row); amend it by index "
+                  "to name it, or leave its index out of the amend to remove it")
+    else:
+        detail = _review_text(e["name"], e.get("muscle_group"), source) if flag else None
     unit = e.get("entered_unit")
     return ExerciseDetail(
         index=index,
-        name=e["name"],
+        name=e.get("name"),
         raw_name=e.get("raw_name"),
         muscle_group=e.get("muscle_group"),
         muscle_source=source,
@@ -154,8 +163,9 @@ def list_sessions(limit: int) -> list[dict]:
     call) the second query needs no page restriction, and it skips
     catalog-sourced exercises (never flagged). `id` comes back as its string
     form: building 10,000 UUID objects alone cost ~13 ms, and every surface
-    serializes it to a string anyway. Cost is linear in the page's exercises. Exercises without a name (not producible by the
-    logger) are skipped, as session detail skips them.
+    serializes it to a string anyway. Cost is linear in the page's exercises.
+    A nameless entry (older rows only) counts as needing review, as in
+    session detail.
     """
     d = get_duckdb()
     rows = d.execute(
@@ -170,8 +180,8 @@ def list_sessions(limit: int) -> list[dict]:
     pairs = d.execute(
         f"""SELECT e.name, e.muscle_source, list(rid)
             FROM (SELECT rowid AS rid, UNNEST(exercises) AS e FROM sessions {page})
-            WHERE e IS NOT NULL AND e.name IS NOT NULL
-              AND e.muscle_source IS DISTINCT FROM 'catalog'  -- never flagged (_needs_review)
+            WHERE e.muscle_source IS DISTINCT FROM 'catalog' OR e.name IS NULL
+            -- (a named catalog exercise is never flagged; a nameless entry always is)
             GROUP BY e.name, e.muscle_source""",
         [limit] if page else []).fetchall()
     position = {r[0]: i for i, r in enumerate(rows)}
@@ -186,8 +196,7 @@ def list_sessions(limit: int) -> list[dict]:
 
 def _row_to_detail(row: tuple) -> SessionDetail:
     sid, d, phase, kind, score, feedback, created, exercises = row
-    exs = [_exercise(e, i) for i, e in enumerate(exercises or [])
-           if e is not None and e.get("name") is not None]
+    exs = [_exercise(e, i) for i, e in enumerate(exercises or [])]
     return SessionDetail(
         id=sid, date=d, phase=phase, kind=kind, pre_recovery_score=score,
         post_feedback=feedback, created_at=created, exercises=exs,
@@ -296,17 +305,17 @@ def _identity(name: str | None) -> str:
 def _referenced(exercises: list, stored: list[dict]) -> list[tuple[dict, bool] | None]:
     """Per amend exercise: (the stored exercise its `index` names, same
     identity?) or None for a `new` one. An index outside the stored session
-    is invalid input."""
+    is invalid input. A nameless stored entry can be referenced too (coach_
+    session_detail shows it); naming it is a rename from nothing."""
     out: list[tuple[dict, bool] | None] = []
     for ex in exercises:
         if ex.index is None:
             out.append(None)
             continue
-        if (ex.index >= len(stored) or stored[ex.index] is None
-                or stored[ex.index].get("name") is None):
+        if ex.index >= len(stored):
             raise ValueError(f"index {ex.index} ('{ex.name}') is not an exercise of this "
                              "session; use the indexes coach_session_detail shows")
-        s = stored[ex.index]
+        s = stored[ex.index] or {}
         out.append((s, _identity(s.get("name")) == _identity(ex.name)))
     return out
 
@@ -391,7 +400,7 @@ def _not_carried_on_rename(ex, replaced: dict, restated_muscle: bool) -> list[An
     they were the user's own; one flag per value that changes the result."""
     flags: list[AnomalyFlag] = []
     new = classify(ex.name)
-    old_name = replaced.get("name")
+    old_name = replaced.get("name") or "(nameless entry)"
     if restated_muscle and replaced.get("muscle_source") != MuscleSource.caller.value:
         given = ex.muscle_group
         ex.muscle_group = None  # derived for the new name, like a fresh log
@@ -426,6 +435,7 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
     before = _snapshot(sid)
     if before is None:
         raise ValueError(f"no session with id {sid}")
+    removed = _removed(before["exercises"], data.exercises)
     keep, carry_flags = _provenance_to_keep(data.exercises, before["exercises"])
     fresh = SessionInput(
         date=data.date, exercises=data.exercises,
@@ -449,11 +459,29 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
                       after=_snapshot(sid))
 
     audit_id = _in_transaction(work)
+    message = "session amended; previous version audited"
+    if removed:
+        message += (f"; removed {len(removed)} stored exercise(s) not restated "
+                    "(see removed_exercises)")
     return SessionChange(action="amended", session_id=sid, audit_id=audit_id,
-                         anomaly_flags=flags, phase=phase.value, kind=fresh.kind.value,
+                         anomaly_flags=flags, removed_exercises=removed,
+                         phase=phase.value, kind=fresh.kind.value,
                          pre_recovery_score=fresh.pre_recovery_score,
-                         post_feedback=fresh.post_feedback,
-                         message="session amended; previous version audited")
+                         post_feedback=fresh.post_feedback, message=message)
+
+
+def _removed(stored: list | None, exercises: list) -> list[RemovedExercise]:
+    """Every stored exercise no amend exercise restates by `index` — they are
+    dropped from the row, so each is reported (nameless entries included)."""
+    kept = {ex.index for ex in exercises if ex.index is not None}
+    out = []
+    for i, s in enumerate(stored or []):
+        if i in kept:
+            continue
+        s = s or {}
+        out.append(RemovedExercise(index=i, name=s.get("name"), raw_name=s.get("raw_name"),
+                                   muscle_group=s.get("muscle_group"), sets=s.get("sets")))
+    return out
 
 
 def delete_session(session_id) -> SessionChange:

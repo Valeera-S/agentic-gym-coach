@@ -239,8 +239,10 @@ def test_listing_counts_match_an_independent_recount():
                 {"name": "Thing", "muscle_source": "future_source", "sets": 1},
                 None]])
     rows = d.execute("SELECT id, exercises FROM sessions ORDER BY date DESC, created_at DESC, id").fetchall()
-    expected = [sum(1 for e in (exs or []) if e is not None and e["name"] is not None
-                    and _needs_review(e["name"], e["muscle_source"])) for _, exs in rows]
+    # every stored entry counts; a NULL / nameless one always needs review (P22)
+    expected = [sum(1 for e in (exs or [])
+                    if e is None or _needs_review(e["name"], e["muscle_source"]))
+                for _, exs in rows]
     for limit in (0, 1, 7, 30, 31, 100):
         got = list_sessions(limit)
         assert [g["id"] for g in got] == [str(r[0]) for r in rows][:limit]
