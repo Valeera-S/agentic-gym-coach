@@ -5,19 +5,25 @@ data/gym_coach.duckdb), with the schema applied once per session. Set via
 env vars read by skills.init BEFORE any test imports it. The production DB
 and its backfilled sessions are never touched by the test suite.
 
-ponytail: single-process pytest only. Concurrent pytest-xdist workers would
-collide on the shared temp file — add per-worker temp paths if that matters.
+Each pytest run gets its own private temp directory (mkdtemp), so runs from
+separate checkouts can run at the same time without fighting over one file
+(P31). It is removed at session end. Still single-process WITHIN a run (xdist
+workers would each get their own DB, but the suite is not tuned for it).
 """
 
+import atexit
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parent
-_TEST_DUCK = Path(tempfile.gettempdir()) / "gym_coach_test.duckdb"
-_TEST_LANCE = Path(tempfile.gettempdir()) / "gym_coach_test_lance"
+_RUN_DIR = Path(tempfile.mkdtemp(prefix="gym_coach_test_"))
+_TEST_DUCK = _RUN_DIR / "gym_coach_test.duckdb"
+_TEST_LANCE = _RUN_DIR / "lance"
+atexit.register(shutil.rmtree, _RUN_DIR, ignore_errors=True)  # backstop; the fixture cleans first
 
 # Set BEFORE skills.init is imported anywhere.
 os.environ["GYM_COACH_DUCKDB"] = str(_TEST_DUCK)
@@ -35,7 +41,10 @@ def _init_test_schema():
     cfg.set_main_option("sqlalchemy.url", f"duckdb:///{_TEST_DUCK}")
     command.upgrade(cfg, "head")
     yield
-    # leave the temp file; OS temp cleanup handles it eventually
+    from skills.init import close_all
+
+    close_all()
+    shutil.rmtree(_RUN_DIR, ignore_errors=True)
 
 
 _TABLES = ("bodyweight_log", "sessions", "injury_status", "decision_log",
