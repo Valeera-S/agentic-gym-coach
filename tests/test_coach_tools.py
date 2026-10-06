@@ -25,9 +25,10 @@ def test_input_errors_map_to_invalid_input():
     assert p == {"error": "invalid_input", "exception": "ValueError", "detail": "bad muscle"}
 
 
-def test_keyerror_and_attributeerror_map_to_invalid_input():
-    assert error_payload(KeyError("exercise"))["error"] == "invalid_input"
-    assert error_payload(AttributeError("'int' has no strip"))["error"] == "invalid_input"
+def test_keyerror_and_attributeerror_map_to_internal():
+    # P53: raised inside a skill they are bugs the caller cannot fix
+    assert error_payload(KeyError("exercise"))["error"] == "internal"
+    assert error_payload(AttributeError("'int' has no strip"))["error"] == "internal"
 
 
 def test_db_errors_map_to_db_and_unknown_to_internal():
@@ -67,10 +68,11 @@ def test_trend_default_still_applies():
     assert out["effective_volume"] == 0.0
 
 
-def test_sessions_limit_zero_ok_negative_rejected():
-    assert cmd_sessions({"limit": 0}) == {"sessions": [], "count": 0}
-    with pytest.raises(ValueError):
-        cmd_sessions({"limit": -1})  # was a DuckDB BinderException shape
+def test_sessions_limit_must_be_positive():
+    assert cmd_sessions({"limit": 1}) == {"sessions": [], "count": 0}
+    for bad in (0, -1):  # P53: limits are positive integers
+        with pytest.raises(ValueError):
+            cmd_sessions({"limit": bad})
 
 
 # --- boundary guards --------------------------------------------------------
@@ -110,9 +112,9 @@ def test_injuries_seed_via_dispatch_rejects_bad_vocab():
 @pytest.mark.parametrize("raw, exc", [
     ("{bad json", "JSONDecodeError"),
     ("", "JSONDecodeError"),
-    ("[1, 2]", "TypeError"),
-    ('"just a string"', "TypeError"),
-    ("null", "TypeError"),
+    ("[1, 2]", "InputError"),
+    ('"just a string"', "InputError"),
+    ("null", "InputError"),
 ])
 def test_cli_rejects_malformed_or_non_object_json_with_the_error_contract(raw, exc):
     import json
@@ -195,3 +197,72 @@ def test_cli_no_args_and_help_still_list_commands_with_exit_0():
         out = _cli(*argv)
         assert out.returncode == 0
         assert json.loads(out.stdout) == {"available": list(DISPATCH)}
+
+
+# --- P53: read-tool bounds and the error mapping ------------------------------------
+
+@pytest.mark.parametrize("cmd, args", [
+    ("recovery", {"date": "0001-01-01"}),
+    ("trend", {"muscle": "quads", "end_date": "0001-01-01"}),
+    ("bodyweight_history", {"end_date": "0001-01-01"}),
+    ("recovery", {"date": "1999-12-31"}),
+    ("trend", {"muscle": "quads", "end_date": "2099-01-01"}),
+    ("bodyweight_history", {"end_date": "2099-01-01"}),
+    ("recovery", {"date": 20260101}),  # not a string
+])
+def test_read_tool_dates_outside_the_plausible_range_are_invalid_input(cmd, args):
+    with pytest.raises(ValueError) as exc:
+        DISPATCH[cmd](args)
+    assert error_payload(exc.value)["error"] == "invalid_input"
+
+
+@pytest.mark.parametrize("bad", [10**30, 0, -1, 100_001, 1e30, 2.5, True, "5", None])
+@pytest.mark.parametrize("cmd", ["sessions", "memory_search"])
+def test_limits_are_positive_bounded_integers(cmd, bad):
+    with pytest.raises(ValueError) as exc:
+        DISPATCH[cmd]({"limit": bad})
+    assert error_payload(exc.value)["error"] == "invalid_input"
+
+
+def test_limit_bounds_are_inclusive():
+    assert DISPATCH["sessions"]({"limit": 1})["count"] == 0
+    assert DISPATCH["sessions"]({"limit": 100_000})["count"] == 0
+
+
+@pytest.mark.parametrize("exc", [AttributeError("'NoneType' has no x"), KeyError("k"),
+                                 IndexError("out of range"), TypeError("unexpected"),
+                                 ZeroDivisionError(), OverflowError("too big")])
+def test_programming_errors_map_to_internal(exc):
+    assert error_payload(exc)["error"] == "internal"
+
+
+@pytest.mark.parametrize("exc", [ValueError("bad"), coach_tools.InputError("missing x")])
+def test_validation_errors_map_to_invalid_input(exc):
+    assert error_payload(exc)["error"] == "invalid_input"
+
+
+def test_pydantic_validation_error_maps_to_invalid_input():
+    with pytest.raises(ValidationError) as exc:
+        DISPATCH["bodyweight_log"]({"date": "2026-10-01"})
+    assert error_payload(exc.value)["error"] == "invalid_input"
+
+
+def test_a_bug_inside_a_reader_is_internal_not_invalid_input(monkeypatch):
+    import mcp_server
+    import skills.sessions
+
+    def boom(limit):
+        raise AttributeError("'NoneType' object has no attribute 'strip'")
+    monkeypatch.setattr(skills.sessions, "list_sessions", boom)
+    out = mcp_server.coach_sessions(limit=3)
+    assert out["error"] == "internal" and out["exception"] == "AttributeError"
+
+
+@pytest.mark.parametrize("cmd, args", [
+    ("safety_check", {}), ("session_delete", {}), ("trend", {}),
+    ("injuries_seed", {}), ("memory_save", {}),
+])
+def test_a_missing_required_argument_is_invalid_input(cmd, args):
+    with pytest.raises(ValueError) as exc:
+        DISPATCH[cmd](args)
+    assert error_payload(exc.value)["error"] == "invalid_input"

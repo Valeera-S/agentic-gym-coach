@@ -7,9 +7,14 @@ All output is JSON to stdout.
 Error contract (both surfaces): a failure prints/returns
     {"error": <code>, "exception": <class name>, "detail": <message>}
 and the CLI exits 1. Codes:
-    invalid_input — fix the arguments (bad vocabulary, missing key, wrong type)
+    invalid_input — fix the arguments (bad vocabulary, missing key, wrong type,
+                    out-of-range number or date). ONLY genuine validation failures
+                    map here: pydantic ValidationError and ValueError (incl. the
+                    explicit argument checks, `InputError`)
     db            — storage failure: halt and report; don't retry blindly
-    internal      — unexpected bug: halt and report
+    internal      — everything else, notably programming errors (AttributeError,
+                    KeyError, IndexError, TypeError, ...) raised inside a skill:
+                    the caller cannot fix those by changing the input
 
 List-returning tools return an object ({"sessions": [...], "count": n}, ...): a bare empty
 list reaches an MCP client as empty content, indistinguishable from a failed call.
@@ -36,13 +41,60 @@ DEFAULT_SEARCH_LIMIT = 20
 DEFAULT_MEMORY_KIND = "observation"
 DEFAULT_SESSION_KIND = "training"
 
-# Caller mistakes (bad value, missing key, wrong type) — the caller can fix
-# these by re-issuing the call. Anything else is db/internal: halt and report.
-_INPUT_ERROR_EXCS = (ValueError, TypeError, KeyError, AttributeError)
+# Upper bound for list-size arguments (sessions / memory_search `limit`):
+# generous (the 10K-row perf guards list everything) yet far below DuckDB's
+# 64-bit LIMIT, which a 10**30 used to overflow into a `db` error (P53).
+MAX_LIMIT = 100_000
 
 
-def _parse_date(s: str | None) -> date | None:
-    return date.fromisoformat(s) if s else None
+class InputError(ValueError):
+    """An explicit argument check failed (missing key, wrong type, out of
+    range, unknown key). A ValueError so it maps to `invalid_input`."""
+
+
+# Caller mistakes: pydantic ValidationError subclasses ValueError, as do the
+# repo's own validation errors and InputError. KeyError / AttributeError /
+# IndexError / TypeError are NOT here: raised inside a skill they are bugs the
+# caller cannot fix (P53) -- handlers check their arguments explicitly instead.
+_INPUT_ERROR_EXCS = (ValueError,)
+
+
+def _parse_date(value, key: str = "date", *, bounded: bool = True) -> date | None:
+    """ISO date argument. `bounded` applies the input boundary's plausible-date
+    window (models.dates, P38): a year-0001 date used to overflow inside the
+    reader (`internal`)."""
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise InputError(f"{key} must be an ISO date string (YYYY-MM-DD), got {type(value).__name__}")
+    d = date.fromisoformat(value)
+    if bounded:
+        from models.dates import check_plausible_date
+        try:
+            check_plausible_date(d)
+        except ValueError as e:
+            raise InputError(f"{key}: {e}") from None
+    return d
+
+
+def _require(args: dict, key: str, typ: type | None = None):
+    """A required argument: present and (optionally) of the given type --
+    an explicit check, so a missing key is invalid_input, never a KeyError."""
+    if key not in args or args[key] is None:
+        raise InputError(f"missing required argument '{key}'")
+    v = args[key]
+    if typ is not None and not isinstance(v, typ):
+        raise InputError(f"{key} must be a {typ.__name__}, got {type(v).__name__}")
+    return v
+
+
+def _str_list(args: dict, key: str) -> list[str] | None:
+    v = args.get(key)
+    if v is None:
+        return None
+    if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+        raise InputError(f"{key} must be a list of strings")
+    return v
 
 
 def _int_arg(args: dict, key: str, default: int, *,
@@ -80,7 +132,7 @@ def cmd_log_session(args: dict):
 
 def cmd_safety_check(args: dict):
     from skills.safety_gate import check_exercise_safety
-    return check_exercise_safety(args["exercise"]).model_dump(mode="json")
+    return check_exercise_safety(_require(args, "exercise", str)).model_dump(mode="json")
 
 
 def cmd_recovery(args: dict):
@@ -92,12 +144,12 @@ def cmd_recovery(args: dict):
 def cmd_trend(args: dict):
     from models import MuscleGroup
     from skills.trend_analysis import get_specialization_trend
-    muscle = MuscleGroup(args["muscle"])
+    muscle = MuscleGroup(_require(args, "muscle"))
     return get_specialization_trend(
         muscle,
         window_days=_int_arg(args, "window_days", DEFAULT_TREND_WINDOW_DAYS,
                              minimum=1, maximum=3650),
-        end_date=_parse_date(args.get("end_date")),
+        end_date=_parse_date(args.get("end_date"), "end_date"),
     ).model_dump(mode="json")
 
 
@@ -113,7 +165,7 @@ def cmd_intake_status(args: dict):
 
 def cmd_sessions(args: dict):
     from skills.sessions import list_sessions
-    limit = _int_arg(args, "limit", DEFAULT_SESSIONS_LIMIT, minimum=0)
+    limit = _int_arg(args, "limit", DEFAULT_SESSIONS_LIMIT, minimum=1, maximum=MAX_LIMIT)
     rows = list_sessions(limit)
     return {"sessions": rows, "count": len(rows)}
 
@@ -123,7 +175,7 @@ def cmd_session_detail(args: dict):
     session_id, on_date = args.get("session_id"), args.get("date")
     if session_id is not None and not isinstance(session_id, str):
         raise ValueError("session_id must be a string UUID")
-    details = get_session_detail(session_id=session_id, on_date=_parse_date(on_date))
+    details = get_session_detail(session_id=session_id, on_date=_parse_date(on_date, bounded=False))
     return {"sessions": [d.model_dump(mode="json") for d in details]}
 
 
@@ -136,7 +188,7 @@ def cmd_session_amend(args: dict):
 
 def cmd_session_delete(args: dict):
     from skills.sessions import delete_session
-    return delete_session(args["session_id"]).model_dump(mode="json")
+    return delete_session(_require(args, "session_id")).model_dump(mode="json")
 
 
 def cmd_bodyweight_log(args: dict):
@@ -150,7 +202,7 @@ def cmd_bodyweight_history(args: dict):
     from skills.bodyweight import bodyweight_history
     return bodyweight_history(
         _int_arg(args, "window_days", DEFAULT_BODYWEIGHT_WINDOW_DAYS, minimum=1, maximum=3650),
-        _parse_date(args.get("end_date")) or date.today(),
+        _parse_date(args.get("end_date"), "end_date") or date.today(),
     ).model_dump(mode="json")
 
 
@@ -163,7 +215,7 @@ def cmd_injuries_list(args: dict):
 def cmd_injuries_seed(args: dict):
     from skills.injuries import seed_injury
     res = seed_injury(
-        args["location"], args["status"], args["severity"],
+        _require(args, "location"), _require(args, "status"), _require(args, "severity"),
         args.get("contraindicated_exercises"), args.get("safe_alternatives"),
     )
     message = f"seeded {res.injury.location.value}={res.injury.status.value}"
@@ -200,19 +252,22 @@ def cmd_memory_save(args: dict):
     from models import NoteKind
     from skills.memory import add_note
     note = add_note(
-        args["text"],
+        _require(args, "text", str),
         kind=NoteKind(args.get("kind", DEFAULT_MEMORY_KIND)),
-        tags=args.get("tags", []),
+        tags=_str_list(args, "tags") or [],
     )
     return note.model_dump(mode="json")
 
 
 def cmd_memory_search(args: dict):
     from skills.memory import search_notes
+    query = args.get("query")
+    if query is not None and not isinstance(query, str):
+        raise InputError(f"query must be a string, got {type(query).__name__}")
     notes = search_notes(
-        query=args.get("query"),
-        tags=args.get("tags"),
-        limit=_int_arg(args, "limit", DEFAULT_SEARCH_LIMIT, minimum=0),
+        query=query,
+        tags=_str_list(args, "tags"),
+        limit=_int_arg(args, "limit", DEFAULT_SEARCH_LIMIT, minimum=1, maximum=MAX_LIMIT),
     )
     return {"notes": [n.model_dump(mode="json") for n in notes], "count": len(notes)}
 
@@ -271,7 +326,7 @@ def main() -> None:
         # never a traceback (P27)
         args = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
         if not isinstance(args, dict):
-            raise TypeError(f"arguments must be a JSON object, got {type(args).__name__}")
+            raise InputError(f"arguments must be a JSON object, got {type(args).__name__}")
         result = fn(args)
         if hasattr(result, "model_dump_json"):
             print(result.model_dump_json(indent=2))
