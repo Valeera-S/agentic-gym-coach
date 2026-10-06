@@ -26,7 +26,7 @@ Contract: <200ms. Aggregated metrics must match recomputed values within 5%.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
 import polars as pl
@@ -39,7 +39,7 @@ from .injuries import tendon_summary
 from .metrics import epley_expr, qualifies_for_est_1rm
 from .phase import current_phase
 from .profile import derive_priority_muscles, get_profile
-from .trend_analysis import hard_sets_by_muscle, with_identity
+from .trend_analysis import hard_sets_by_muscle, window_start, with_identity
 
 # Representative lifts. Each may be a generic / pre-split name: every concrete
 # identity in its family is reported under its OWN name, never pooled — the
@@ -160,7 +160,7 @@ def _insight(vol_by_muscle: dict[str, float]) -> tuple[str, str]:
 
 def generate_phase_snapshot() -> PhaseSnapshot:
     today = date.today()
-    start = today - timedelta(days=_WINDOW_DAYS)
+    start = window_start(today, _WINDOW_DAYS)
     sets_df = _fetch_all_sets(start, today)
 
     spec_lifts = _specialization_1rms(sets_df)

@@ -80,3 +80,34 @@ def test_form_discount_applies_to_tonnage_and_sets():
     vol = hard_sets_by_muscle(T - timedelta(days=7), T)
     assert vol["quads"] == pytest.approx(1.0)   # 2 sets x 0.5
     assert vol["side_delt"] == pytest.approx(3.0)
+
+
+# --- P29: window_days=N is exactly N calendar days ending at end_date ---------
+
+def test_window_includes_day_n_minus_1_before_end_and_excludes_day_n():
+    _log(T - timedelta(days=6), [40.0])   # N-1 days before end: inside a 7-day window
+    _log(T - timedelta(days=7), [40.0])   # N days before end: outside
+    r = get_specialization_trend(MuscleGroup.side_delt, window_days=7, end_date=T)
+    assert r.effective_volume == pytest.approx(1.0)
+    assert r.sessions_in_window == 1
+
+
+def test_window_includes_end_date_itself():
+    _log(T, [40.0])
+    r = get_specialization_trend(MuscleGroup.side_delt, window_days=1, end_date=T)
+    assert r.effective_volume == pytest.approx(1.0)
+    _log(T - timedelta(days=1), [40.0])
+    r = get_specialization_trend(MuscleGroup.side_delt, window_days=1, end_date=T)
+    assert r.effective_volume == pytest.approx(1.0)
+
+
+def test_snapshot_window_is_28_days_not_29():
+    from skills.snapshot import generate_phase_snapshot
+    today = date.today()
+    for back in (27, 28):
+        log_session(SessionInput(date=today - timedelta(days=back), exercises=[
+            ExerciseModel(name="Incline Bench Press" if back == 27 else "Pull-Up",
+                          sets=1, reps=[5], rpe=[9], weight_kg=[40.0], form_quality=5)]))
+    lifts = generate_phase_snapshot().specialization_lifts
+    assert "Incline Bench Press" in lifts      # day 27 back: last day of the 28-day window
+    assert "Pull-Up" not in lifts              # day 28 back: outside

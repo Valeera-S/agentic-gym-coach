@@ -34,7 +34,7 @@ Volume currency = effective hard sets per muscle per week: sets × form_mult (fo
 - safety_gate.check_exercise_safety(str) -> SafetyResult  (<10ms, deterministic)
 - injuries.list_injuries()/get_active_injuries()/seed_injury() — single owner of injury_status; write-time vocabulary validation + name canonicalization
 - recovery.compute_recovery_score(date) -> RecoveryScore  (<30ms)
-- trend_analysis.get_specialization_trend(muscle, window_days, end_date) -> TrendReport (direction: est-1RM when heavy sets exist in both halves, else per-exercise performance — double progression; detail.direction_basis / identity_directions); hard_sets_by_muscle(start, end)  (<100ms on 10K rows)
+- trend_analysis.get_specialization_trend(muscle, window_days, end_date) -> TrendReport (direction: est-1RM when heavy sets exist in both halves, else per-exercise performance — double progression; detail.direction_basis / identity_directions); hard_sets_by_muscle(start, end)  (<100ms on 10K rows); `window_days=N` = exactly N calendar days ending at `end_date` inclusive (`trend_analysis.window_start`, also the snapshot's 28-day anchor)
 - metrics — shared Epley/est-1RM helpers (single definition)
 - phase.current_phase()/phase_for_logging() — single phase resolver
 - snapshot.generate_phase_snapshot() -> PhaseSnapshot (incl. computed block_state + session_gap); session_gap(today) -> weeks since the last training session (habits excluded) + staleness verdict (threshold REASSESSMENT_GAP_WEEKS, a labeled heuristic)  (<200ms)

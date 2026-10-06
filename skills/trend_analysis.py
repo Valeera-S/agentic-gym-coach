@@ -83,6 +83,19 @@ from .init import get_duckdb
 from .metrics import epley_expr, est_1rm, qualifies_for_est_1rm
 
 
+def window_start(end: date, window_days: int) -> date:
+    """First calendar day of a `window_days`-day window ending at `end`.
+
+    A window of N days is exactly N calendar days INCLUDING `end` (end-N+1 ..
+    end), so the inclusive SQL range never reaches a day too far back (P29: the
+    old `end - N` start made every window N+1 days). Single definition — trend,
+    snapshot and any caller of hard_sets_by_muscle derive their start here
+    (recovery's 7-day counts, end-7 .. end-1 excluding the query day, are
+    already exactly 7 days).
+    """
+    return end - timedelta(days=window_days - 1)
+
+
 def _fetch_entries(start: date, end: date) -> pl.DataFrame:
     """Entry-level rows: one row per exercise within a session."""
     sql = """
@@ -245,7 +258,7 @@ def get_specialization_trend(
                          "volume or trend; map the exercise instead")
     # end_date lets the coach analyze/backtest historical slices; default today.
     anchor = end_date or date.today()
-    start = anchor - timedelta(days=window_days)
+    start = window_start(anchor, window_days)
     df = _fetch_entries(start, anchor)
 
     crediting = list(exercises_crediting(muscle))
