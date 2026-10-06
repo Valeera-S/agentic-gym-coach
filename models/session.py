@@ -23,8 +23,8 @@ LB_TO_KG = 0.45359237
 # garbage (rpe=11, sets=1e9, weight=1e308) fails at the boundary instead of
 # poisoning volume sums or crashing at the DB layer (adversarial F5).
 _PER_SET_BOUNDS: dict[str, tuple[float, float]] = {
-    "reps": (0, 100),
-    "rpe": (0, 10),
+    "reps": (1, 100),  # a recorded rep count is >= 1; null = unrecorded (P37)
+    "rpe": (1, 10),    # RPE scale is 1-10; null = unrecorded (P37)
     "weight_kg": (0, 2000),
 }
 

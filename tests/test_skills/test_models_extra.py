@@ -142,3 +142,26 @@ def test_matching_and_empty_arrays_still_accepted_and_padded():
     m = ExerciseModel(name="Leg Press", sets=3, reps=[5, 5, 5])
     assert m.rpe == [None] * 3 and m.weight_kg == [None] * 3
     assert ExerciseModel(name="Leg Press", sets=3).reps == []
+
+
+# --- a recorded rep count is >= 1, a recorded rpe is within 1..10 (P37) ------------
+
+@pytest.mark.parametrize("field, bad", [
+    ("reps", 0), ("reps", 0.1), ("reps", 0.99), ("reps", -1),
+    ("rpe", 0), ("rpe", 0.5), ("rpe", 0.99), ("rpe", 10.5),
+])
+def test_unrealistic_recorded_reps_or_rpe_rejected(field, bad):
+    with pytest.raises(Exception, match=field):
+        ExerciseModel(name="Squat", sets=1, weight_kg=[200.0], **{field: [bad]})
+
+
+def test_boundary_reps_and_rpe_accepted_and_null_still_means_unrecorded():
+    m = ExerciseModel(name="Squat", sets=3, reps=[1, None, 100], rpe=[1, None, 10])
+    assert m.reps == [1, None, 100] and m.rpe == [1, None, 10]
+
+
+def test_zero_rep_set_is_rejected_at_the_tool_so_it_cannot_count_as_a_hard_set():
+    from coach_tools import DISPATCH
+    with pytest.raises(ValueError, match="reps"):
+        DISPATCH["log_session"]({"date": "2026-10-01", "exercises": [
+            {"name": "Squat", "sets": 1, "reps": [0], "weight_kg": [200]}]})
