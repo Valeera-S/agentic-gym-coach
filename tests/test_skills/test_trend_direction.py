@@ -368,3 +368,36 @@ def test_habit_sessions_are_not_counted_as_sessions():
         _log(days_ago, _ex("Lat Pulldown", 50.0, 10))
     log_session(SessionInput(date=END, kind="habit", exercises=[_ex("Lat Pulldown", 50.0, 10)]))
     assert _trend(M.lats).sessions_in_window == 4
+
+
+# --- P46: est-1RM direction is per identity and primary-only ------------------
+
+def test_overlap_only_exercise_does_not_decide_triceps_direction():
+    for days_ago, (kg, reps, bench) in ((13, (30.0, 10, 100.0)), (9, (30.0, 10, 100.0)),
+                                        (5, (35.0, 12, 80.0)), (0, (35.0, 12, 80.0))):
+        _log(days_ago, _ex("Tricep Pushdown", kg, reps, sets=3),
+             _ex("Barbell Bench Press", bench, 5, sets=3))
+    r = _trend(M.triceps)
+    assert r.trend_direction is TrendDirection.up and r.stalled is False
+    assert r.detail["direction_basis"] == "performance"
+    assert r.est_1rm_kg is None          # the bench is overlap credit, not a primary
+
+
+def test_implement_switch_is_not_regression():
+    for days_ago, name, kg in ((13, "Barbell Bench Press", 100.0), (9, "Barbell Bench Press", 100.0),
+                               (5, "Dumbbell Incline Press", 42.5), (0, "Dumbbell Incline Press", 42.5)):
+        _log(days_ago, _ex(name, kg, 5, sets=3))
+    r = _trend(M.chest)
+    assert r.trend_direction is TrendDirection.unknown   # no identity in both halves
+    assert r.stalled is False
+    assert r.est_1rm_kg == pytest.approx(100 * (1 + 5 / 30), abs=0.1)
+
+
+def test_est_1rm_votes_per_identity_weighted_by_sets():
+    # bench 100 -> 110 (up, 16 sets); incline press 60 -> 50 (down, 8 sets)
+    for days_ago, bench, row in ((13, 100.0, 60.0), (9, 100.0, 60.0), (5, 110.0, 50.0), (0, 110.0, 50.0)):
+        _log(days_ago, _ex("Barbell Bench Press", bench, 5, sets=4),
+             _ex("Dumbbell Incline Press", row, 5, sets=2))
+    r = _trend(M.chest)
+    assert r.detail["direction_basis"] == "est_1rm"
+    assert r.trend_direction is TrendDirection.up        # 16 up sets beat 8 down sets
