@@ -294,9 +294,9 @@ class SessionAmendInput(BaseModel):
 
 
 class SessionChange(BaseModel):
-    """Return of skills.sessions.amend_session() / delete_session()."""
+    """Return of skills.sessions.amend_session() / delete_session() / restore_snapshot()."""
 
-    action: Literal["amended", "deleted"]
+    action: Literal["amended", "deleted", "restored"]
     session_id: UUID
     audit_id: UUID                   # decision_log row holding the pre-change snapshot
     anomaly_flags: list[AnomalyFlag] = Field(default_factory=list)  # amend: as a fresh log

@@ -579,3 +579,52 @@ def test_an_index_naming_a_hidden_legacy_entry_is_invalid_input():
     with pytest.raises(ValueError, match="indexes coach_session_detail shows"):
         DISPATCH["session_amend"]({"session_id": sid, "date": "2026-10-04", "exercises": [
             {"index": 1, "name": "Squat", "sets": 1}]})
+
+
+# --- restore is itself audited (P21) -------------------------------------------------
+
+def _restore_rows():
+    return get_duckdb().execute(
+        "SELECT id, trigger_signal, payload FROM decision_log "
+        "WHERE event_type = 'session_restore' ORDER BY created_at").fetchall()
+
+
+def test_restoring_an_amend_writes_its_own_audit_entry_holding_the_overwritten_row():
+    sid = _log()
+    original = _row(sid)
+    DISPATCH["session_amend"]({"session_id": sid, "date": "2026-10-05",
+                               "exercises": [{"new": True, "name": "Squat", "sets": 1}]})
+    amended = _row(sid)
+    (amend_audit, *_), = _audit_rows()
+    out = restore_snapshot(amend_audit)
+    assert _row(sid) == original
+    (restore_audit, signal, payload), = _restore_rows()
+    assert out.action == "restored" and out.audit_id == restore_audit
+    assert signal == f"session {sid} restored from audit {amend_audit}"
+    snap = json.loads(payload)
+    assert snap["session_id"] == sid and snap["restored_from"] == str(amend_audit)
+    assert snap["before"]["exercises"][0]["name"] == "Squat"      # the state it overwrote
+    assert snap["after"]["date"] == "2026-10-04"
+    # ... so the restore is reversible from its own entry
+    restore_snapshot(restore_audit)
+    assert _row(sid) == amended
+
+
+def test_restoring_a_delete_is_audited_and_reversible_by_deleting_again():
+    sid = _log()
+    original = _row(sid)
+    DISPATCH["session_delete"]({"session_id": sid})
+    (delete_audit, *_), = _audit_rows()
+    restore_snapshot(delete_audit)
+    assert _row(sid) == original
+    (restore_audit, _, payload), = _restore_rows()
+    assert json.loads(payload)["before"] is None                  # nothing was overwritten
+    restore_snapshot(restore_audit)
+    assert _row(sid) is None
+    assert len(_restore_rows()) == 2                              # undoing is audited too
+
+
+def test_a_failed_restore_writes_no_audit_entry():
+    with pytest.raises(ValueError):
+        restore_snapshot("00000000-0000-0000-0000-000000000000")
+    assert _restore_rows() == []

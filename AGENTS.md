@@ -67,7 +67,7 @@ No lint/typecheck config exists in this repo — don't invoke tools that aren't 
 - **No LLM reasoning inside `skills/`** — skills are pure code.
 - **Tier 3 memory writes require explicit user command** ("save this"). Never auto-write. Profiles may be written after user confirmation (echo + confirm).
 - **Cite retrieved values explicitly** — never paraphrase from memory. If retrieval returns null, say "I don't have that data." Do not guess.
-- **Log every plan modification** (incl. goal changes — automatic in `skills/profile.py`) to the decision audit trail. Session amend/delete write the complete pre-change row to `decision_log.payload` in the same transaction (`skills/sessions.py::restore_snapshot` puts it back — a coding-agent recovery helper, not a coach tool).
+- **Log every plan modification** (incl. goal changes — automatic in `skills/profile.py`) to the decision audit trail. Session amend/delete write the complete pre-change row to `decision_log.payload` in the same transaction (`skills/sessions.py::restore_snapshot` puts it back and writes its own `session_restore` audit entry holding the state it overwrote — a coding-agent recovery helper, not a coach tool).
 - **Doctrine questions route through the vendored skills** (`docs/knowledge/helms-*/SKILL.md`) — at most one knowledge file per turn.
 
 ## Error posture

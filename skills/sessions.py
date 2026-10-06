@@ -19,8 +19,8 @@ weight was read (`load_type`) and the weight + unit as entered.
 Unknown id or date -> ValueError (the tool contract's invalid_input).
 Contract: deterministic. Reads are read-only; amend_session / delete_session write the
 sessions row and its decision_log audit entry in one transaction. The restore_snapshot
-recovery helper rewrites the sessions row in one transaction and writes no audit entry
-of its own.
+recovery helper does the same and writes its own `session_restore` entry (holding the
+state it overwrote), so a restore is itself reversible.
 """
 
 from __future__ import annotations
@@ -244,18 +244,25 @@ def _snapshot(sid: UUID) -> dict | None:
     }
 
 
-_PAST = {DecisionEventType.session_amend: "amended", DecisionEventType.session_delete: "deleted"}
+_PAST = {DecisionEventType.session_amend: "amended", DecisionEventType.session_delete: "deleted",
+         DecisionEventType.session_restore: "restored"}
 
 
-def _audit(event: DecisionEventType, sid: UUID, before: dict, note: str,
-           after: dict | None = None) -> UUID:
+def _audit(event: DecisionEventType, sid: UUID, before: dict | None, note: str,
+           after: dict | None = None, restored_from: UUID | None = None) -> UUID:
+    """One audit entry. `before` is the row the change overwrites or removes
+    (None for a restore that re-creates a deleted session: nothing existed)."""
     payload = {"session_id": str(sid), "before": before}
     if after is not None:
         payload["after"] = after
+    signal = f"session {sid} {_PAST[event]}"
+    if restored_from is not None:
+        payload["restored_from"] = str(restored_from)
+        signal += f" from audit {restored_from}"
     return get_duckdb().execute(
         """INSERT INTO decision_log (event_type, trigger_signal, reasoning_chain, payload)
            VALUES (?, ?, ?, ?) RETURNING id""",
-        [event.value, f"session {sid} {_PAST[event]}", note,
+        [event.value, signal, note,
          json.dumps(payload, ensure_ascii=False)],
     ).fetchone()[0]
 
@@ -467,26 +474,47 @@ def delete_session(session_id) -> SessionChange:
                          message="session deleted; its full row is in the audit trail")
 
 
-def restore_snapshot(audit_id) -> UUID:
+def restore_snapshot(audit_id) -> SessionChange:
     """Put a session back exactly as an audit entry recorded it before the
     change (a deleted session is re-inserted; an amended one is overwritten).
-    For recovery by the coding agent — deliberately not a coach tool."""
+    For recovery by the coding agent — deliberately not a coach tool.
+
+    The restore is itself audited (`session_restore`, in the same transaction)
+    so the audit chain has no gap: its payload holds the row it overwrote as
+    `before` (None when the session did not exist), the restored row as
+    `after`, and `restored_from`. Restoring that entry puts the overwritten
+    state back — or, when nothing existed, deletes the session again.
+    """
+    aid = _uuid(audit_id)
     row = get_duckdb().execute(
-        "SELECT event_type, payload FROM decision_log WHERE id = ?", [_uuid(audit_id)]).fetchone()
-    if row is None or row[1] is None:
+        "SELECT event_type, payload FROM decision_log WHERE id = ?", [aid]).fetchone()
+    if row is None or row[1] is None or row[0] not in {e.value for e in _PAST}:
         raise ValueError(f"no restorable audit entry {audit_id}")
-    before = json.loads(row[1])["before"]
-    sid = UUID(before["id"])
+    recorded = json.loads(row[1])
+    before = recorded["before"]
+    sid = UUID(recorded["session_id"])
 
     def work():
         d = get_duckdb()
+        overwritten = _snapshot(sid)
         d.execute("DELETE FROM sessions WHERE id = ?", [sid])
-        d.execute(
-            """INSERT INTO sessions (id, date, phase, kind, pre_recovery_score, post_feedback,
-                                     created_at, exercises)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            [sid, before["date"], before["phase"], before["kind"], before["pre_recovery_score"],
-             before["post_feedback"], before["created_at"], before["exercises"]])
-        return sid
+        if before is not None:
+            d.execute(
+                """INSERT INTO sessions (id, date, phase, kind, pre_recovery_score, post_feedback,
+                                         created_at, exercises)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                [sid, before["date"], before["phase"], before["kind"],
+                 before["pre_recovery_score"], before["post_feedback"], before["created_at"],
+                 before["exercises"]])
+        if before is None:
+            note = "restored: session removed (the entry recorded none)"
+        elif overwritten is None:
+            note = "restored: session re-created"
+        else:
+            note = "restored: session overwritten"
+        return _audit(DecisionEventType.session_restore, sid, overwritten, note,
+                      after=_snapshot(sid), restored_from=aid)
 
-    return _in_transaction(work)
+    new_audit = _in_transaction(work)
+    return SessionChange(action="restored", session_id=sid, audit_id=new_audit,
+                         message="session restored; the state it replaced is in the audit trail")
