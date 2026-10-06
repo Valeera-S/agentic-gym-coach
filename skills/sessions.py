@@ -223,7 +223,7 @@ def get_session_detail(session_id: str | UUID | None = None,
     if (session_id is None) == (on_date is None):
         raise ValueError("give exactly one of session_id or date")
     if session_id is not None:
-        sid = session_id if isinstance(session_id, UUID) else UUID(str(session_id))
+        sid = _uuid(session_id)
         rows = get_duckdb().execute(
             f"SELECT {_COLS} FROM sessions WHERE id = ?", [sid]).fetchall()
         if not rows:
@@ -243,12 +243,19 @@ def get_session_detail(session_id: str | UUID | None = None,
 # rpe included), so the row can be put back from the audit entry alone
 # (restore_snapshot()). An unknown id is invalid_input; nothing is written.
 
-def _uuid(session_id) -> UUID:
-    if isinstance(session_id, UUID):
-        return session_id
-    if not isinstance(session_id, str):
-        raise ValueError("session_id must be a string UUID")
-    return UUID(session_id)
+def _uuid(value, what: str = "session_id") -> UUID:
+    """A session (or audit) id as a UUID; anything else is invalid_input with a
+    message that says what the id is and where it comes from (P63)."""
+    if isinstance(value, UUID):
+        return value
+    try:
+        if isinstance(value, str):
+            return UUID(value)
+    except ValueError:
+        pass
+    shown = repr(value) if len(repr(value)) <= 60 else repr(value)[:57] + "...'"
+    raise ValueError(f"{what} must be a UUID (as returned by coach_sessions / "
+                     f"coach_session_detail), got {shown}")
 
 
 def _snapshot(sid: UUID) -> dict | None:
@@ -453,11 +460,8 @@ def parse_amend_input(args: dict) -> SessionAmendInput:
     reports it)."""
     context = None
     sid = args.get("session_id") if isinstance(args, dict) else None
-    if isinstance(sid, (str, UUID)):
-        try:
-            snap = _snapshot(sid if isinstance(sid, UUID) else UUID(sid))
-        except ValueError:
-            snap = None
+    if sid is not None:
+        snap = _snapshot(_uuid(sid))
         if snap is not None:
             context = {"stored_exercises": snap["exercises"] or [],
                        "stored_date": date.fromisoformat(snap["date"])}
@@ -589,7 +593,7 @@ def restore_snapshot(audit_id) -> SessionChange:
     `after`, and `restored_from`. Restoring that entry puts the overwritten
     state back — or, when nothing existed, deletes the session again.
     """
-    aid = _uuid(audit_id)
+    aid = _uuid(audit_id, "audit_id")
     row = get_duckdb().execute(
         "SELECT event_type, payload FROM decision_log WHERE id = ?", [aid]).fetchone()
     if row is None or row[1] is None or row[0] not in {e.value for e in _PAST}:
