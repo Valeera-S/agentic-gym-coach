@@ -190,7 +190,10 @@ def test_safety_gate_still_blocks_an_unclassified_name_banned_verbatim():
     from skills.safety_gate import check_exercise_safety
     seed_injury("lower_back", "active", 6, contraindicated_exercises=["Zercher Carry"])
     assert check_exercise_safety("zercher carry").safe is False
-    assert check_exercise_safety("Farmer's Walk").safe is True
+    # P76: a name the catalog does not know cannot be cleared against the active
+    # bans, so it fails closed until restated with its catalog identity
+    unknown = check_exercise_safety("Farmer's Walk")
+    assert unknown.safe is False and "not recognized" in unknown.reason
 
 
 def test_a_null_entry_in_a_stored_ban_list_is_skipped_not_a_crash():

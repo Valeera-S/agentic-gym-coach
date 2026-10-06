@@ -16,10 +16,12 @@ Flow:
   3. If a match: unsafe + the matching rows' safe_alternatives, merged and
      filtered so none is itself banned (empty list + `message` if none survive). The caller
      MUST NOT suggest the exercise; offer the alternatives.
-  4. Else: safe. When the name itself didn't map to a catalog entry, the
-     reason says so — an unmapped name may be a misspelling of a banned
-     exercise, so the coach confirms with the user (fail-open residual,
-     adversarial F1 / audit Q4).
+  4. Else, a name the catalog does not recognize (a typo, a non-English name:
+     "卧推") cannot be checked against the bans, so it FAILS CLOSED while any
+     ban is active: unsafe, no alternatives, `message` tells the coach to
+     restate it with its catalog (English) identity (P76). With no active ban
+     nothing could be hiding, so it stays safe (+ the review suffix).
+  5. Else: safe.
 
 Contract: deterministic, <10ms. Never assumes tendon state — only the
 injury_status table is the source of truth. An empty table ⇒ everything safe.
@@ -28,19 +30,31 @@ injury_status table is the source of truth. An empty table ⇒ everything safe.
 from __future__ import annotations
 
 from models import SafetyResult, canonicalize
-from models.exercise_catalog import ban_match_names
+from models.exercise_catalog import ban_match_names, resolve_name
 from models.text import clean_name
 
-from .injuries import contraindication_hits, unbanned
+from .injuries import contraindication_hits, has_active_bans, unbanned
 
 
 def check_exercise_safety(exercise: str) -> SafetyResult:
     # a blank or malformed name is not a query: invalid_input, never "safe" (P66, P70)
     clean_name(exercise)
     can_name, _mg, needs_review = canonicalize(exercise)
+    # "Recognized" = a catalog identity/alias. A keyword guess ("Bench Pres") is
+    # NOT recognition: it may be a misspelling of a banned exercise.
+    recognized = resolve_name(exercise) is not None
     # The identity plus every name whose ban covers it across the catalog's
     # identity split (legacy merged names, generic names) — fail-closed.
     rows = contraindication_hits(ban_match_names(can_name))
+    if not rows and not recognized and has_active_bans():
+        return SafetyResult(
+            exercise=can_name,
+            safe=False,
+            reason=("exercise name not recognized, so it cannot be checked against the "
+                    "active contraindications"),
+            message=("restate the exercise with its catalog (English) identity and check "
+                     "again; do not suggest it until then"),
+        )
     if not rows:
         reason = "no active contraindication"
         if needs_review:
@@ -51,7 +65,10 @@ def check_exercise_safety(exercise: str) -> SafetyResult:
     # Alternatives are merged from EVERY row that bans this exercise (stable:
     # row order, then list order) and then filtered through the gate against
     # all current bans — a banned alternative is never offered (P33).
-    alts = unbanned(a for _l, _s, row_alts in rows for a in row_alts)
+    # An unrecognized alternative could not pass this gate itself (it fails
+    # closed while bans are active), so it is never offered either (P76).
+    alts = unbanned(a for _l, _s, row_alts in rows for a in row_alts
+                    if resolve_name(a) is not None)
     return SafetyResult(
         exercise=can_name,
         safe=False,

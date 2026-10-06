@@ -192,6 +192,13 @@ def _live_rows() -> list[tuple[str, str, list[str], list[str]]]:
             if rid in current and st != "resolved"]
 
 
+def has_active_bans() -> bool:
+    """True when any CURRENT non-resolved injury row (latest per location) bans
+    at least one exercise — i.e. there is something an unrecognized name could
+    be hiding from. Same row selection as the gate (`_live_rows`)."""
+    return any(contra for _l, _s, contra, _a in _live_rows())
+
+
 def contraindication_hits(names: Iterable[str]) -> list[tuple[str, str, list[str]]]:
     """Current non-resolved injury rows (newest first) that ban any of `names`.
 
