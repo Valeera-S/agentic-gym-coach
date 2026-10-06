@@ -7,6 +7,9 @@ differ by more than a week of real change. So every reading carries a
 condition, and `summarize` averages PER CONDITION — it never blends them — over
 DAILY values (readings within a day are averaged first).
 
+kg values in read outputs (readings, means) are rounded to 2 decimals; the
+stored kg and the entered weight + unit stay exact.
+
 Does not write profile.bodyweight_kg (profile writes need the user's confirmation).
 """
 
@@ -50,7 +53,10 @@ def list_readings(start: date, end: date) -> list[BodyweightReading]:
     rows = get_duckdb().execute(
         f"SELECT {_COLS} FROM bodyweight_log WHERE date BETWEEN ? AND ? "
         "ORDER BY date, created_at, id", [start, end]).fetchall()
-    return [_reading(r) for r in rows]
+    # P64b: a read output shows kg to 2 decimals (an lb entry converts to float
+    # noise like 66.00000000003666); the stored value and the entered value +
+    # unit stay exact. log_bodyweight echoes the exact row it wrote.
+    return [_reading(r).model_copy(update={"weight_kg": round(r[2], 2)}) for r in rows]
 
 
 def summarize(start: date, end: date) -> BodyweightSummary:
