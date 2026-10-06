@@ -128,7 +128,7 @@ def connection_scope() -> Iterator[None]:
 # --- schema revision guard (P75) ---------------------------------------------
 # The Alembic revision this code needs. tests/test_schema_guard.py asserts it
 # equals Alembic's head, so a new migration cannot land without bumping it.
-REQUIRED_SCHEMA_REVISION = "0005_bodyweight_log"
+REQUIRED_SCHEMA_REVISION = "0006_session_label"
 
 # DB paths whose revision check has PASSED in this process. A failing check is
 # never cached, so `alembic upgrade head` run while the server is up fixes the
