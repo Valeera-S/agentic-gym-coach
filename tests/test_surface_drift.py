@@ -23,6 +23,7 @@ def test_mcp_wrapper_defaults_come_from_coach_tools():
     """Defaults are single-sourced in coach_tools; wrappers import them."""
     cases = [
         ("coach_trend", "window_days", coach_tools.DEFAULT_TREND_WINDOW_DAYS),
+        ("coach_bodyweight_history", "window_days", coach_tools.DEFAULT_BODYWEIGHT_WINDOW_DAYS),
         ("coach_sessions", "limit", coach_tools.DEFAULT_SESSIONS_LIMIT),
         ("coach_memory_search", "limit", coach_tools.DEFAULT_SEARCH_LIMIT),
         ("coach_memory_save", "kind", coach_tools.DEFAULT_MEMORY_KIND),

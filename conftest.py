@@ -38,7 +38,7 @@ def _init_test_schema():
     # leave the temp file; OS temp cleanup handles it eventually
 
 
-_TABLES = ("sessions", "injury_status", "decision_log",
+_TABLES = ("bodyweight_log", "sessions", "injury_status", "decision_log",
            "phase_snapshots", "user_profiles", "memory_notes")
 
 

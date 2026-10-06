@@ -31,10 +31,10 @@ Interpreter: use `.venv/bin/python` (repo venv) — bare `python` is not on PATH
 .venv/bin/python -m pytest -m slow -q    # 3 perf guards on 10K-row synthetic sets (run separately)
 .venv/bin/python scripts/ingest_log.py --dry-run [file]   # parse a log.md, no DB writes
 .venv/bin/python scripts/ingest_log.py --reset [file]     # ⚠ DELETE FROM sessions first, then re-ingest
-.venv/bin/python coach_tools.py          # dispatcher — prints available subcommands (16)
+.venv/bin/python coach_tools.py          # dispatcher — prints available subcommands (18)
 alembic upgrade head                    # apply migrations (bootstrap a fresh DB this way; honours GYM_COACH_DUCKDB, creates data/)
 .venv/bin/python scripts/sync_adapters.py    # render COACH_PROMPT.md → native agent files, if any registered (--check for drift)
-.venv/bin/python mcp_server.py          # MCP stdio server (16 tools + coach_doctrine)
+.venv/bin/python mcp_server.py          # MCP stdio server (18 tools + coach_doctrine; incl. coach_bodyweight_log / coach_bodyweight_history over migration 0005's `bodyweight_log` — every reading carries a required measurement condition and averages are per condition; the snapshot's body_weight_kg is the 7-day morning_fasted mean)
 ```
 
 No lint/typecheck config exists in this repo — don't invoke tools that aren't set up.

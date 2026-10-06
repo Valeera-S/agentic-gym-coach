@@ -164,7 +164,7 @@ class UserProfile(BaseModel):
     disliked_exercises: list[str] = Field(default_factory=list)
     # Nutrition-side inputs (Nutrition ch02–ch05 prescriptions are per-bodyweight,
     # sex-, age-, and bodyfat-dependent). bodyweight_kg is the onboarding snapshot;
-    # the tracked series lives in phase_snapshots.body_weight_kg.
+    # the tracked series lives in bodyweight_log (snapshot body_weight_kg = 7-day fasted mean).
     sex: Sex | None = None
     age_years: int | None = Field(default=None, ge=14, le=100)
     bodyweight_kg: float | None = Field(default=None, gt=0, le=400)
