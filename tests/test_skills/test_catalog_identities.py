@@ -350,3 +350,16 @@ def test_supinated_lateral_raise_is_a_grip_alias():
 def test_generic_squat_and_row_cover_the_new_identities():
     assert "Bodyweight Squat" in ban_match_names("squat")
     assert "Chest-Supported Dumbbell Row" in ban_match_names("Row")
+
+
+def test_no_two_identities_collide_under_lookup_key():
+    # P44: lookup_key is the single normalization owner; a stronger key must
+    # still keep every catalog name/alias on exactly one identity.
+    from models.exercise_catalog import CATALOG, lookup_key, resolve_name
+    owner: dict[str, str] = {}
+    for ident, ex in CATALOG.items():
+        for name in (ident, *ex.aliases):
+            key = lookup_key(name)
+            assert key, name
+            assert owner.setdefault(key, ident) == ident, (name, owner[key], ident)
+            assert resolve_name(name) == ident, name

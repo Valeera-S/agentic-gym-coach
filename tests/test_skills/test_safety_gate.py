@@ -118,3 +118,40 @@ def test_no_surviving_alternative_gives_empty_list_and_message():
 
 def test_safe_result_has_no_message():
     assert check_exercise_safety("Squat").message == ""
+
+
+# --- P44: Unicode-aware name normalization (one lookup_key owner) -----------
+
+_UNICODE_SPELLINGS = (
+    "Ｄｕｍｂｂｅｌｌ Ｆｌｙ",        # fullwidth
+    "Dumbbell\u200bFly",              # zero-width space
+    "Dumbbell\u00a0Fly",              # no-break space
+    "Dumbbell Fly.",                  # trailing punctuation
+    "DUMBBELL\u2009FLY",              # thin space + case
+)
+
+
+def test_unicode_spellings_of_a_banned_name_are_blocked():
+    _seed_injury(contra=["Dumbbell Fly"], alts=["Push-Up"])
+    for spelling in _UNICODE_SPELLINGS:
+        r = check_exercise_safety(spelling)
+        assert r.safe is False, repr(spelling)
+        assert r.exercise == "Dumbbell Fly"
+
+
+def test_ban_stored_with_unicode_spelling_blocks_plain_query():
+    _seed_injury(contra=["Ｄｕｍｂｂｅｌｌ Ｆｌｙ"], alts=["Push-Up"])
+    assert check_exercise_safety("Dumbbell Fly").safe is False
+    _seed_injury(loc="right_elbow", contra=["Zercher\u200bHold."], alts=["Push-Up"])
+    assert check_exercise_safety("zercher hold").safe is False
+
+
+def test_lookup_key_rules():
+    from models.exercise_catalog import lookup_key
+    assert lookup_key("Ｄｕｍｂｂｅｌｌ  Ｆｌｙ") == "dumbbell fly"
+    assert lookup_key("Dumbbell\u200bFly") == "dumbbell fly"  # zero-width SPACE is a word break
+    assert lookup_key("Dumb\u00adbell\u200dFly") == "dumbbellfly"  # soft hyphen / ZWJ: dropped
+    assert lookup_key("  Chest-Supported_Row. ") == "chest supported row"
+    assert lookup_key("ß") == "ss"  # casefold, not lower
+    assert lookup_key("深蹲") == "深蹲"  # non-Latin names survive
+    assert lookup_key("...") == ""

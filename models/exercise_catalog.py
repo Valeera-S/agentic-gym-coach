@@ -36,6 +36,7 @@ credited to no muscle (see classify()). Ingestion never blocks on an unknown.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from .doctrine_ch03 import EXERCISE_PATTERN, chart_credit, chart_primaries
@@ -176,20 +177,27 @@ _ENTRIES: tuple[Exercise, ...] = (
 CATALOG: dict[str, Exercise] = {e.name: e for e in _ENTRIES}
 
 
-_SEPARATORS = str.maketrans("-_", "  ")
-
-
 def lookup_key(name: str) -> str:
-    """Normalize a name for catalog lookup: lower case, outer whitespace
-    trimmed, '-' and '_' read as spaces ("chest-supported" == "chest
-    supported"), inner runs of whitespace collapsed ("lat   pulldown"). The
-    safety gate normalizes stored ban entries with this same function
+    """Normalize a name for catalog lookup and ban matching.
+
+    Steps: Unicode NFKC (fullwidth/compatibility forms -> plain), casefold,
+    drop invisible format characters (category Cf: soft hyphen, ZWJ/ZWNJ, BOM,
+    ... — except U+200B ZERO WIDTH SPACE, which is read as a word break, since
+    pasted text uses it where a space was), then every character that is not
+    alphanumeric (str.isalnum, Unicode-aware so CJK names survive) is a space
+    — hyphens, underscores, punctuation, NBSP — and whitespace runs collapse
+    ("chest-supported" == "chest supported" == "Chest Supported.").
+    The safety gate normalizes stored ban entries with this same function
     (skills/injuries.py); both sides must normalize identically or
-    canonicalization and the ban match stop composing (adversarial F1; P24).
-    This is the ONLY normalization site — never inline a variant of it.
-    Hyphen/space spellings are one key, so never list them as separate
-    aliases (the catalog build rejects a name claimed twice)."""
-    return " ".join(name.translate(_SEPARATORS).split()).lower()
+    canonicalization and the ban match stop composing — and any spelling that
+    slips through is a banned exercise reported safe (adversarial F1; P24;
+    P44). This is the ONLY normalization site — never inline a variant of it.
+    Differently-spelled-but-equal names are one key, so never list them as
+    separate aliases (the catalog build rejects a name claimed twice)."""
+    text = unicodedata.normalize("NFKC", name).casefold().replace("​", " ")
+    text = "".join(c if c.isalnum() else (" " if unicodedata.category(c) != "Cf" else "")
+                   for c in text)
+    return " ".join(text.split())
 
 
 def _derive() -> tuple[dict[str, MuscleGroup], dict[str, list[MuscleGroup]]]:
