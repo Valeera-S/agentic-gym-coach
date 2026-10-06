@@ -19,8 +19,8 @@ weight was read (`load_type`) and the weight + unit as entered.
 Unknown id or date -> ValueError (the tool contract's invalid_input).
 Contract: deterministic. Reads are read-only; amend_session / delete_session write the
 sessions row and its decision_log audit entry in one transaction. The restore_snapshot
-recovery helper rewrites the sessions row in one transaction and writes no audit entry
-of its own.
+recovery helper does the same and writes its own `session_restore` entry (holding the
+state it overwrote), so a restore is itself reversible.
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ from models import (
     MuscleGroup,
     MuscleSource,
     PhaseType,
+    RemovedExercise,
     SessionAmendInput,
     SessionChange,
     SessionDetail,
@@ -73,12 +74,13 @@ def _f32(x: float | None) -> float | None:
     return x
 
 
-@lru_cache(maxsize=4096)
+@lru_cache(maxsize=1 << 16)
 def _needs_review(name: str | None, source: str | None) -> bool:
-    # memoized: a listing asks this for the same few (name, source) pairs
-    # thousands of times, and the answer depends on nothing else
+    # memoized: the answer depends on nothing else. Sized above any realistic
+    # page's distinct pairs: a smaller LRU is evicted in full by one cyclic
+    # scan of a large page and then never hits
     if name is None:
-        return True  # not producible by the logger; never assume it is confirmed
+        return True  # a nameless entry (older rows only); never assume it is confirmed
     known = resolve_name(name) is not None
     if source is None:
         return not known
@@ -91,14 +93,22 @@ def _needs_review(name: str | None, source: str | None) -> bool:
     return True  # a source this version does not know: never assume it is confirmed
 
 
-def _exercise(e: dict, index: int | None = None) -> ExerciseDetail:
+def _exercise(e: dict | None, index: int | None = None) -> ExerciseDetail:
+    """One stored exercise as ExerciseDetail. A nameless entry (some older rows
+    hold them, and NULL entries) is shown too — with its index, as needing
+    review — so the caller can see and reference everything stored."""
+    e = e or {}
     source = e.get("muscle_source")
-    flag = _needs_review(e["name"], source)
-    detail = _review_text(e["name"], e.get("muscle_group"), source) if flag else None
+    flag = _needs_review(e.get("name"), source)
+    if e.get("name") is None:
+        detail = (f"exercise entry {index} has no name (an older row); amend it by index "
+                  "to name it, or leave its index out of the amend to remove it")
+    else:
+        detail = _review_text(e["name"], e.get("muscle_group"), source) if flag else None
     unit = e.get("entered_unit")
     return ExerciseDetail(
         index=index,
-        name=e["name"],
+        name=e.get("name"),
         raw_name=e.get("raw_name"),
         muscle_group=e.get("muscle_group"),
         muscle_source=source,
@@ -145,40 +155,48 @@ def list_sessions(limit: int) -> list[dict]:
 
     No exercise data and no dataframe library cross into Python (a CLI call
     must stay inside its 0.5 s budget, and Polars/pyarrow alone cost ~0.3 s to
-    import). DuckDB groups the page's exercises by (name, muscle_source) with
-    the page positions each pair occurs at; each distinct pair is decided once
-    here (the catalog lookup, memoized) and its positions are counted. Cost is
-    linear in the page's exercises; each distinct pair is decided only once.
-    Exercises without a name (not producible by the logger) are skipped, as
-    session detail skips them.
+    import). One query returns the page's rows (with their rowid); a second
+    groups the page's exercises by (name, muscle_source) with the rowids each
+    pair occurs at. Each distinct pair is decided once (the catalog lookup,
+    memoized) and its rowids are counted onto their page positions. The page
+    is sorted only once: when it holds the whole table (the usual large-limit
+    call) the second query needs no page restriction, and it skips
+    catalog-sourced exercises (never flagged). `id` comes back as its string
+    form: building 10,000 UUID objects alone cost ~13 ms, and every surface
+    serializes it to a string anyway. Cost is linear in the page's exercises.
+    A nameless entry (older rows only) counts as needing review, as in
+    session detail.
     """
     d = get_duckdb()
     rows = d.execute(
-        "SELECT id, date, phase, pre_recovery_score, post_feedback, kind FROM sessions "
+        "SELECT rowid, CAST(id AS VARCHAR), date, phase, pre_recovery_score, post_feedback, kind "
+        "FROM sessions "
         f"ORDER BY {_ORDER} LIMIT ?", [limit]).fetchall()
+    if not rows:
+        return []
+    total = d.execute("SELECT count(*) FROM sessions").fetchone()[0]
+    page = "" if len(rows) == total else (
+        f"WHERE rowid IN (SELECT rowid FROM sessions ORDER BY {_ORDER} LIMIT ?)")
     pairs = d.execute(
-        f"""WITH page AS (
-                SELECT id, row_number() OVER (ORDER BY {_ORDER}) - 1 AS pos
-                FROM sessions ORDER BY {_ORDER} LIMIT ?)
-            SELECT e.name, e.muscle_source, list(pos)
-            FROM (SELECT p.pos, UNNEST(s.exercises) AS e
-                  FROM page p JOIN sessions s USING (id))
-            WHERE e IS NOT NULL AND e.name IS NOT NULL
+        f"""SELECT e.name, e.muscle_source, list(rid)
+            FROM (SELECT rowid AS rid, UNNEST(exercises) AS e FROM sessions {page})
+            WHERE e.muscle_source IS DISTINCT FROM 'catalog' OR e.name IS NULL
+            -- (a named catalog exercise is never flagged; a nameless entry always is)
             GROUP BY e.name, e.muscle_source""",
-        [limit]).fetchall()
+        [limit] if page else []).fetchall()
+    position = {r[0]: i for i, r in enumerate(rows)}
     counts = [0] * len(rows)
-    for name, source, positions in pairs:
+    for name, source, rids in pairs:
         if _needs_review(name, source):
-            for pos in positions:
-                counts[pos] += 1
+            for rid in rids:
+                counts[position[rid]] += 1
     cols = ["id", "date", "phase", "pre_recovery_score", "post_feedback", "kind"]
-    return [{**dict(zip(cols, r)), "needs_review": n} for r, n in zip(rows, counts)]
+    return [{**dict(zip(cols, r[1:])), "needs_review": n} for r, n in zip(rows, counts)]
 
 
 def _row_to_detail(row: tuple) -> SessionDetail:
     sid, d, phase, kind, score, feedback, created, exercises = row
-    exs = [_exercise(e, i) for i, e in enumerate(exercises or [])
-           if e is not None and e.get("name") is not None]
+    exs = [_exercise(e, i) for i, e in enumerate(exercises or [])]
     return SessionDetail(
         id=sid, date=d, phase=phase, kind=kind, pre_recovery_score=score,
         post_feedback=feedback, created_at=created, exercises=exs,
@@ -235,18 +253,25 @@ def _snapshot(sid: UUID) -> dict | None:
     }
 
 
-_PAST = {DecisionEventType.session_amend: "amended", DecisionEventType.session_delete: "deleted"}
+_PAST = {DecisionEventType.session_amend: "amended", DecisionEventType.session_delete: "deleted",
+         DecisionEventType.session_restore: "restored"}
 
 
-def _audit(event: DecisionEventType, sid: UUID, before: dict, note: str,
-           after: dict | None = None) -> UUID:
+def _audit(event: DecisionEventType, sid: UUID, before: dict | None, note: str,
+           after: dict | None = None, restored_from: UUID | None = None) -> UUID:
+    """One audit entry. `before` is the row the change overwrites or removes
+    (None for a restore that re-creates a deleted session: nothing existed)."""
     payload = {"session_id": str(sid), "before": before}
     if after is not None:
         payload["after"] = after
+    signal = f"session {sid} {_PAST[event]}"
+    if restored_from is not None:
+        payload["restored_from"] = str(restored_from)
+        signal += f" from audit {restored_from}"
     return get_duckdb().execute(
         """INSERT INTO decision_log (event_type, trigger_signal, reasoning_chain, payload)
            VALUES (?, ?, ?, ?) RETURNING id""",
-        [event.value, f"session {sid} {_PAST[event]}", note,
+        [event.value, signal, note,
          json.dumps(payload, ensure_ascii=False)],
     ).fetchone()[0]
 
@@ -280,17 +305,17 @@ def _identity(name: str | None) -> str:
 def _referenced(exercises: list, stored: list[dict]) -> list[tuple[dict, bool] | None]:
     """Per amend exercise: (the stored exercise its `index` names, same
     identity?) or None for a `new` one. An index outside the stored session
-    is invalid input."""
+    is invalid input. A nameless stored entry can be referenced too (coach_
+    session_detail shows it); naming it is a rename from nothing."""
     out: list[tuple[dict, bool] | None] = []
     for ex in exercises:
         if ex.index is None:
             out.append(None)
             continue
-        if (ex.index >= len(stored) or stored[ex.index] is None
-                or stored[ex.index].get("name") is None):
+        if ex.index >= len(stored):
             raise ValueError(f"index {ex.index} ('{ex.name}') is not an exercise of this "
                              "session; use the indexes coach_session_detail shows")
-        s = stored[ex.index]
+        s = stored[ex.index] or {}
         out.append((s, _identity(s.get("name")) == _identity(ex.name)))
     return out
 
@@ -321,11 +346,13 @@ def _provenance_to_keep(exercises: list, stored: list[dict] | None,
         equals the stored kg loads of a weight + unit entry.
     A referenced exercise of a DIFFERENT identity is a rename: it keeps only
     the weight + unit as entered (same rule), and values copied from the old
-    exercise that were NOT the user's own are not applied to the new name —
-    a `muscle_group` equal to its stored non-caller muscle (unless
-    `confirm_muscle`), and a `load_type` equal to its stored one where the
-    new identity's default differs (that default applies). A caller-set
-    muscle carries over. Each value not applied that changes the result is
+    exercise are not applied to the new name — a `muscle_group` equal to its
+    stored muscle (unless `confirm_muscle`; a caller-set muscle is no
+    exception — it belonged to the old exercise, and an unrelated new one
+    must not inherit it), and a `load_type` equal to its stored one where the
+    new identity's default differs (that default applies). A muscle_group
+    that differs from the stored one is the caller's own choice and is kept.
+    Each value not applied that changes the result is
     returned as an `amend_not_applied` flag naming it; restate it to apply it
     (`confirm_muscle`, or a follow-up amend for load_type).
     Changed values go through as changes.
@@ -371,19 +398,24 @@ def _provenance_to_keep(exercises: list, stored: list[dict] | None,
 
 
 def _not_carried_on_rename(ex, replaced: dict, restated_muscle: bool) -> list[AnomalyFlag]:
-    """Drop values a renamed exercise copied from the one it replaces, unless
-    they were the user's own; one flag per value that changes the result."""
+    """Drop values a renamed exercise copied from the one it replaces; one flag
+    per value that changes the result. A muscle_group equal to the old
+    exercise's is a copy whoever set it there — a caller-set one included —
+    unless `confirm_muscle` restates it (a different muscle_group is the
+    caller's own explicit choice and is kept)."""
     flags: list[AnomalyFlag] = []
     new = classify(ex.name)
-    old_name = replaced.get("name")
-    if restated_muscle and replaced.get("muscle_source") != MuscleSource.caller.value:
+    old_name = replaced.get("name") or "(nameless entry)"
+    if restated_muscle:
         given = ex.muscle_group
         ex.muscle_group = None  # derived for the new name, like a fresh log
         if new.muscle_group is not given:
+            was = ("set by the caller on" if replaced.get("muscle_source")
+                   == MuscleSource.caller.value else "stored on")
             flags.append(AnomalyFlag(code=AnomalyCode.amend_not_applied, detail=(
-                f"{new.name}: muscle_group {given.value} matched the replaced exercise "
-                f"'{old_name}' and was not applied; resend it with confirm_muscle: true "
-                "if the user stated it")))
+                f"{new.name}: muscle_group {given.value} ({was} the replaced exercise "
+                f"'{old_name}') was not applied to the new exercise; resend it with "
+                "confirm_muscle: true if the user stated it")))
     default = default_load_type(new.name)
     if (ex.load_type is not None and ex.load_type.value == replaced.get("load_type")
             and ex.load_type is not default):
@@ -410,6 +442,7 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
     before = _snapshot(sid)
     if before is None:
         raise ValueError(f"no session with id {sid}")
+    removed = _removed(before["exercises"], data.exercises)
     keep, carry_flags = _provenance_to_keep(data.exercises, before["exercises"])
     fresh = SessionInput(
         date=data.date, exercises=data.exercises,
@@ -433,11 +466,29 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
                       after=_snapshot(sid))
 
     audit_id = _in_transaction(work)
+    message = "session amended; previous version audited"
+    if removed:
+        message += (f"; removed {len(removed)} stored exercise(s) not restated "
+                    "(see removed_exercises)")
     return SessionChange(action="amended", session_id=sid, audit_id=audit_id,
-                         anomaly_flags=flags, phase=phase.value, kind=fresh.kind.value,
+                         anomaly_flags=flags, removed_exercises=removed,
+                         phase=phase.value, kind=fresh.kind.value,
                          pre_recovery_score=fresh.pre_recovery_score,
-                         post_feedback=fresh.post_feedback,
-                         message="session amended; previous version audited")
+                         post_feedback=fresh.post_feedback, message=message)
+
+
+def _removed(stored: list | None, exercises: list) -> list[RemovedExercise]:
+    """Every stored exercise no amend exercise restates by `index` — they are
+    dropped from the row, so each is reported (nameless entries included)."""
+    kept = {ex.index for ex in exercises if ex.index is not None}
+    out = []
+    for i, s in enumerate(stored or []):
+        if i in kept:
+            continue
+        s = s or {}
+        out.append(RemovedExercise(index=i, name=s.get("name"), raw_name=s.get("raw_name"),
+                                   muscle_group=s.get("muscle_group"), sets=s.get("sets")))
+    return out
 
 
 def delete_session(session_id) -> SessionChange:
@@ -458,26 +509,47 @@ def delete_session(session_id) -> SessionChange:
                          message="session deleted; its full row is in the audit trail")
 
 
-def restore_snapshot(audit_id) -> UUID:
+def restore_snapshot(audit_id) -> SessionChange:
     """Put a session back exactly as an audit entry recorded it before the
     change (a deleted session is re-inserted; an amended one is overwritten).
-    For recovery by the coding agent — deliberately not a coach tool."""
+    For recovery by the coding agent — deliberately not a coach tool.
+
+    The restore is itself audited (`session_restore`, in the same transaction)
+    so the audit chain has no gap: its payload holds the row it overwrote as
+    `before` (None when the session did not exist), the restored row as
+    `after`, and `restored_from`. Restoring that entry puts the overwritten
+    state back — or, when nothing existed, deletes the session again.
+    """
+    aid = _uuid(audit_id)
     row = get_duckdb().execute(
-        "SELECT event_type, payload FROM decision_log WHERE id = ?", [_uuid(audit_id)]).fetchone()
-    if row is None or row[1] is None:
+        "SELECT event_type, payload FROM decision_log WHERE id = ?", [aid]).fetchone()
+    if row is None or row[1] is None or row[0] not in {e.value for e in _PAST}:
         raise ValueError(f"no restorable audit entry {audit_id}")
-    before = json.loads(row[1])["before"]
-    sid = UUID(before["id"])
+    recorded = json.loads(row[1])
+    before = recorded["before"]
+    sid = UUID(recorded["session_id"])
 
     def work():
         d = get_duckdb()
+        overwritten = _snapshot(sid)
         d.execute("DELETE FROM sessions WHERE id = ?", [sid])
-        d.execute(
-            """INSERT INTO sessions (id, date, phase, kind, pre_recovery_score, post_feedback,
-                                     created_at, exercises)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            [sid, before["date"], before["phase"], before["kind"], before["pre_recovery_score"],
-             before["post_feedback"], before["created_at"], before["exercises"]])
-        return sid
+        if before is not None:
+            d.execute(
+                """INSERT INTO sessions (id, date, phase, kind, pre_recovery_score, post_feedback,
+                                         created_at, exercises)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                [sid, before["date"], before["phase"], before["kind"],
+                 before["pre_recovery_score"], before["post_feedback"], before["created_at"],
+                 before["exercises"]])
+        if before is None:
+            note = "restored: session removed (the entry recorded none)"
+        elif overwritten is None:
+            note = "restored: session re-created"
+        else:
+            note = "restored: session overwritten"
+        return _audit(DecisionEventType.session_restore, sid, overwritten, note,
+                      after=_snapshot(sid), restored_from=aid)
 
-    return _in_transaction(work)
+    new_audit = _in_transaction(work)
+    return SessionChange(action="restored", session_id=sid, audit_id=new_audit,
+                         message="session restored; the state it replaced is in the audit trail")

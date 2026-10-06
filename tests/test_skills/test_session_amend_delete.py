@@ -431,6 +431,45 @@ def test_a_new_exercise_in_a_removed_ones_place_keeps_the_users_own_muscle():
                                    "exercises": [_as_input(x) for x in d["exercises"]]})
 
 
+def test_a_rename_does_not_carry_a_caller_set_muscle_unless_restated_explicitly():
+    """P23: a muscle the caller/user had set (triceps) survived a rename to an
+    unrelated back exercise just because the amend was built from the detail
+    read-back (which carries the stored muscle_group)."""
+    conf = log_session(SessionInput(date=D, exercises=[
+        ExerciseModel(name="Barbell Bench Press", muscle_group="triceps", sets=1, reps=[5])]))
+    sid = str(conf.session_id)
+    d = _detail(sid)
+    assert (d["exercises"][0]["muscle_group"], d["exercises"][0]["muscle_source"]) == \
+        ("triceps", "caller")
+    copied = dict(_as_input(d["exercises"][0]), name="Lat Pulldown")   # muscle_group: triceps
+    out = DISPATCH["session_amend"]({"session_id": sid, "date": d["date"], "exercises": [copied]})
+    row = _detail(sid)["exercises"][0]
+    assert (row["name"], row["muscle_group"], row["muscle_source"]) == ("Lat Pulldown", "lats", "catalog")
+    details = [f["detail"] for f in out["anomaly_flags"] if f["code"] == "amend_not_applied"]
+    assert any("muscle_group triceps" in x and "Barbell Bench Press" in x
+               and "confirm_muscle" in x for x in details)
+    # an explicit confirmation keeps it ...
+    DISPATCH["session_amend"]({"session_id": sid, "date": d["date"], "exercises": [
+        dict(copied, name="Lat Pulldown", confirm_muscle=True, muscle_group="lats")]})
+    # ... as does naming a muscle that differs from the old exercise's
+    DISPATCH["session_amend"]({"session_id": sid, "date": d["date"], "exercises": [
+        {"index": 0, "name": "Cable Row", "sets": 1, "reps": [5], "muscle_group": "biceps"}]})
+    row = _detail(sid)["exercises"][0]
+    assert (row["name"], row["muscle_group"], row["muscle_source"]) == ("Cable Row", "biceps", "caller")
+
+
+def test_a_rename_with_confirm_muscle_keeps_a_caller_set_muscle():
+    conf = log_session(SessionInput(date=D, exercises=[
+        ExerciseModel(name="Barbell Bench Press", muscle_group="triceps", sets=1, reps=[5])]))
+    sid = str(conf.session_id)
+    d = _detail(sid)
+    out = DISPATCH["session_amend"]({"session_id": sid, "date": d["date"], "exercises": [
+        dict(_as_input(d["exercises"][0]), name="Lat Pulldown", confirm_muscle=True)]})
+    row = _detail(sid)["exercises"][0]
+    assert (row["muscle_group"], row["muscle_source"]) == ("triceps", "caller")
+    assert not [f for f in out["anomaly_flags"] if "muscle_group" in f["detail"]]
+
+
 def test_a_dropped_copied_muscle_is_reported():
     sid = _log_typed()
     d = _detail(sid)
@@ -568,14 +607,120 @@ def test_a_pre_0003_name_now_an_alias_keeps_what_was_typed_as_raw_name():
     assert (tate["name"], tate["raw_name"]) == ("Tate Pres", None)   # still unknown: unchanged
 
 
-def test_an_index_naming_a_hidden_legacy_entry_is_invalid_input():
-    sid = _legacy_session({"name": "Bench Press", "muscle_group": "core"})
-    s = get_duckdb().execute("SELECT exercises FROM sessions WHERE id = ?", [sid]).fetchone()[0]
+def _session_with_nameless() -> str:
+    """Some older rows carry exercise entries with no name (and NULL entries):
+    named Bench Press at 0, a nameless struct at 1, a NULL entry at 2, a named
+    Squat at 3."""
+    sid = _legacy_session({"name": "Bench Press", "muscle_group": "chest"},
+                          {"name": "Squat", "muscle_group": "quads"})
+    bench, squat = get_duckdb().execute(
+        "SELECT exercises FROM sessions WHERE id = ?", [sid]).fetchone()[0]
     get_duckdb().execute("DELETE FROM sessions")
-    sid = str(get_duckdb().execute(
+    return str(get_duckdb().execute(
         "INSERT INTO sessions (date, phase, exercises, kind) VALUES (?, 'maintenance', ?, "
-        "'training') RETURNING id", [D, [s[0], dict(s[0], name=None)]]).fetchone()[0])
-    assert [x["index"] for x in _detail(sid)["exercises"]] == [0]
+        "'training') RETURNING id",
+        [D, [bench, dict(bench, name=None, sets=3), None, squat]]).fetchone()[0])
+
+
+def test_detail_shows_every_stored_exercise_including_nameless_ones_with_their_index():
+    """P22 (a): nameless entries were hidden from the detail, so the caller
+    could neither see nor reference them."""
+    d = _detail(_session_with_nameless())
+    assert [x["index"] for x in d["exercises"]] == [0, 1, 2, 3]
+    assert [x["name"] for x in d["exercises"]] == ["Bench Press", None, None, "Squat"]
+    nameless = d["exercises"][1]
+    assert nameless["needs_review"] is True and "no name" in nameless["review_detail"]
+    assert nameless["sets"] == 3
+    assert d["needs_review_count"] == 2
+
+
+def test_listing_counts_nameless_entries_like_the_detail_does():
+    sid = _session_with_nameless()
+    assert [s for s in DISPATCH["sessions"]({}) if str(s["id"]) == sid][0]["needs_review"] == 2
+
+
+def test_amend_lists_every_stored_exercise_it_removed_nameless_ones_included():
+    """P22 (b): a whole-session amend dropped nameless entries without a word."""
+    sid = _session_with_nameless()
+    out = DISPATCH["session_amend"]({"session_id": sid, "date": "2026-10-04", "exercises": [
+        {"index": 0, "name": "Bench Press", "sets": 1}]})
+    removed = out["removed_exercises"]
+    assert [(r["index"], r["name"]) for r in removed] == [(1, None), (2, None), (3, "Squat")]
+    assert removed[0]["sets"] == 3 and removed[2]["muscle_group"] == "quads"
+    assert "removed 3 stored exercise" in out["message"]
+    (audit_id, *_), = _audit_rows()
+    before = json.loads(_audit_rows()[0][3])["before"]["exercises"]
+    assert len(before) == 4                      # and they survive in the audit entry
+
+
+def test_amend_that_keeps_everything_removes_and_reports_nothing():
+    sid = _log()
+    d = _detail(sid)
+    out = DISPATCH["session_amend"]({"session_id": sid, "date": d["date"],
+                                     "exercises": [_as_input(x) for x in d["exercises"]]})
+    assert out["removed_exercises"] == [] and "removed" not in out["message"]
+
+
+def test_a_nameless_entry_can_be_referenced_by_index_to_give_it_a_name():
+    sid = _session_with_nameless()
+    out = DISPATCH["session_amend"]({"session_id": sid, "date": "2026-10-04", "exercises": [
+        {"index": 1, "name": "Squat", "sets": 3}]})
+    assert [(r["index"], r["name"]) for r in out["removed_exercises"]] == [
+        (0, "Bench Press"), (2, None), (3, "Squat")]
+    assert [x["name"] for x in _detail(sid)["exercises"]] == ["Squat"]
+
+
+def test_an_index_outside_the_stored_session_is_invalid_input():
+    sid = _session_with_nameless()
     with pytest.raises(ValueError, match="indexes coach_session_detail shows"):
         DISPATCH["session_amend"]({"session_id": sid, "date": "2026-10-04", "exercises": [
-            {"index": 1, "name": "Squat", "sets": 1}]})
+            {"index": 4, "name": "Squat", "sets": 1}]})
+
+
+# --- restore is itself audited (P21) -------------------------------------------------
+
+def _restore_rows():
+    return get_duckdb().execute(
+        "SELECT id, trigger_signal, payload FROM decision_log "
+        "WHERE event_type = 'session_restore' ORDER BY created_at").fetchall()
+
+
+def test_restoring_an_amend_writes_its_own_audit_entry_holding_the_overwritten_row():
+    sid = _log()
+    original = _row(sid)
+    DISPATCH["session_amend"]({"session_id": sid, "date": "2026-10-05",
+                               "exercises": [{"new": True, "name": "Squat", "sets": 1}]})
+    amended = _row(sid)
+    (amend_audit, *_), = _audit_rows()
+    out = restore_snapshot(amend_audit)
+    assert _row(sid) == original
+    (restore_audit, signal, payload), = _restore_rows()
+    assert out.action == "restored" and out.audit_id == restore_audit
+    assert signal == f"session {sid} restored from audit {amend_audit}"
+    snap = json.loads(payload)
+    assert snap["session_id"] == sid and snap["restored_from"] == str(amend_audit)
+    assert snap["before"]["exercises"][0]["name"] == "Squat"      # the state it overwrote
+    assert snap["after"]["date"] == "2026-10-04"
+    # ... so the restore is reversible from its own entry
+    restore_snapshot(restore_audit)
+    assert _row(sid) == amended
+
+
+def test_restoring_a_delete_is_audited_and_reversible_by_deleting_again():
+    sid = _log()
+    original = _row(sid)
+    DISPATCH["session_delete"]({"session_id": sid})
+    (delete_audit, *_), = _audit_rows()
+    restore_snapshot(delete_audit)
+    assert _row(sid) == original
+    (restore_audit, _, payload), = _restore_rows()
+    assert json.loads(payload)["before"] is None                  # nothing was overwritten
+    restore_snapshot(restore_audit)
+    assert _row(sid) is None
+    assert len(_restore_rows()) == 2                              # undoing is audited too
+
+
+def test_a_failed_restore_writes_no_audit_entry():
+    with pytest.raises(ValueError):
+        restore_snapshot("00000000-0000-0000-0000-000000000000")
+    assert _restore_rows() == []
