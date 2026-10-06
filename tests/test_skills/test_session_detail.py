@@ -202,9 +202,10 @@ def test_sessions_listing_stays_fast_on_a_large_limit():
         f"[{exercises}, {odd}, {thing}] FROM range(10000) t(i)")
     DISPATCH["sessions"]({"limit": 10000})  # warm up the same path
     t0 = time.perf_counter()
-    out = DISPATCH["sessions"]({"limit": 10000})
+    res = DISPATCH["sessions"]({"limit": 10000})
     dt_ms = (time.perf_counter() - t0) * 1000
-    assert len(out) == 10000 and out[0]["needs_review"] == 5
+    out = res["sessions"]
+    assert len(out) == res["count"] == 10000 and out[0]["needs_review"] == 5
     assert dt_ms < 100, f"listing took {dt_ms:.1f}ms"
 
 

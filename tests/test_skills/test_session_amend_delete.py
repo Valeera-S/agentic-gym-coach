@@ -468,7 +468,10 @@ def test_a_rename_with_confirm_muscle_keeps_a_caller_set_muscle():
         dict(_as_input(d["exercises"][0]), name="Lat Pulldown", confirm_muscle=True)]})
     row = _detail(sid)["exercises"][0]
     assert (row["muscle_group"], row["muscle_source"]) == ("triceps", "caller")
-    assert not [f for f in out["anomaly_flags"] if "muscle_group" in f["detail"]]
+    assert not [f for f in out["anomaly_flags"]
+                if f["code"] == "amend_not_applied" and "muscle_group" in f["detail"]]
+    # triceps is stored as the user's call, but Lat Pulldown's chart row does not credit it
+    assert "muscle_disagrees_with_catalog" in [f["code"] for f in out["anomaly_flags"]]
 
 
 def test_a_dropped_copied_muscle_is_reported():

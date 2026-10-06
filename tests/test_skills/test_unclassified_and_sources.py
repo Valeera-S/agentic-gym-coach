@@ -316,3 +316,41 @@ def test_ies_plural_ban_still_blocks():
     from skills.safety_gate import check_exercise_safety
     seed_injury("left_shoulder", "active", 4, contraindicated_exercises=["Dumbbell Fly"])
     assert check_exercise_safety("Dumbbell Flies").safe is False
+
+
+# --- a caller muscle that the catalog's chart row does not credit ---------------------
+
+def _disagree_flags(conf):
+    return [f for f in conf.anomaly_flags if f.code.value == "muscle_disagrees_with_catalog"]
+
+
+def test_caller_muscle_outside_the_charts_credit_is_stored_but_flagged():
+    from models.exercise_catalog import credited_muscles
+    conf = _log(ExerciseModel(name="Squat", muscle_group="biceps", sets=1, reps=[5]))
+    assert _stored("muscle_group") == "biceps" and _stored("muscle_source") == "caller"  # caller wins
+    (flag,) = _disagree_flags(conf)
+    assert "Squat" in flag.detail and "biceps" in flag.detail
+    for muscle in credited_muscles("Squat", None):
+        assert muscle in flag.detail  # names what the catalog credits
+
+
+@pytest.mark.parametrize("muscle", ["quads", "glutes"])
+def test_caller_muscle_among_the_credited_ones_is_not_flagged(muscle):
+    from models.exercise_catalog import credited_muscles
+    assert muscle in credited_muscles("Squat", None)
+    conf = _log(ExerciseModel(name="Squat", muscle_group=muscle, sets=1, reps=[5]))
+    assert _disagree_flags(conf) == []
+
+
+def test_no_catalog_disagreement_flag_without_a_caller_muscle_or_for_unknown_names():
+    assert _disagree_flags(_log(ExerciseModel(name="Squat", sets=1))) == []
+    conf = _log(ExerciseModel(name="Zercher Carry", muscle_group="biceps", sets=1))
+    assert _disagree_flags(conf) == []  # not a catalog identity: needs_review covers it
+    assert _review_details(conf)
+
+
+def test_amend_flags_a_new_exercise_the_same_way():
+    sid = str(_log(ExerciseModel(name="Squat", sets=1)).session_id)
+    out = DISPATCH["session_amend"]({"session_id": sid, "date": T.isoformat(), "exercises": [
+        {"new": True, "name": "Squat", "muscle_group": "biceps", "sets": 1}]})
+    assert [f["code"] for f in out["anomaly_flags"]] == ["muscle_disagrees_with_catalog"]
