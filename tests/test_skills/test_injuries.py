@@ -101,6 +101,52 @@ def test_tendon_summary_shape():
     assert summary == {"left_elbow": {"status": "active", "severity": 5}}
 
 
+# --- P34: the latest row per location is the current state ------------------
+
+def test_resolved_row_lifts_earlier_active_ban():
+    seed_injury("left_knee", "active", 6, contraindicated_exercises=["Squat"])
+    assert check_exercise_safety("Squat").safe is False
+    seed_injury("left_knee", "resolved", 0)
+    assert check_exercise_safety("Squat").safe is True
+    assert "left_knee" not in tendon_summary()
+    assert get_active_injuries() == []
+
+
+def test_other_locations_keep_their_bans_when_one_resolves():
+    seed_injury("left_knee", "active", 6, contraindicated_exercises=["Squat"])
+    seed_injury("lower_back", "active", 4, contraindicated_exercises=["Squat"])
+    seed_injury("left_knee", "resolved", 0)
+    assert check_exercise_safety("Squat").safe is False  # lower_back still bans it
+
+
+def test_reactivation_after_resolved_blocks_again():
+    seed_injury("left_knee", "active", 6, contraindicated_exercises=["Squat"])
+    seed_injury("left_knee", "resolved", 0)
+    seed_injury("left_knee", "resolving", 2, contraindicated_exercises=["Leg Press"])
+    assert check_exercise_safety("Squat").safe is True  # old row is history
+    assert check_exercise_safety("Leg Press").safe is False
+    assert tendon_summary() == {"left_knee": {"status": "resolving", "severity": 2}}
+
+
+def test_tendon_summary_reports_latest_row_per_location_deterministically():
+    seed_injury("left_elbow", "active", 7)
+    seed_injury("left_elbow", "chronic_baseline", 2)
+    for _ in range(5):
+        assert tendon_summary() == {"left_elbow": {"status": "chronic_baseline", "severity": 2}}
+
+
+def test_list_injuries_keeps_history_and_flags_current():
+    seed_injury("left_knee", "active", 6, contraindicated_exercises=["Squat"])
+    seed_injury("left_knee", "resolved", 0)
+    seed_injury("lower_back", "active", 3)
+    rows = list_injuries()
+    assert len(rows) == 3
+    cur = {(r.location.value, r.status.value): r.is_current for r in rows}
+    assert cur == {("left_knee", "active"): False, ("left_knee", "resolved"): True,
+                   ("lower_back", "active"): True}
+    assert [r.location.value for r in get_active_injuries()] == ["lower_back"]
+
+
 # --- P35: ban/alternative lists must be lists of non-blank strings ----------
 
 @pytest.mark.parametrize("field", ["contraindicated_exercises", "safe_alternatives"])

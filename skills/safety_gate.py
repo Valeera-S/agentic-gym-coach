@@ -2,7 +2,9 @@
 
 Flow:
   1. Canonicalize the input exercise name (so aliases hit the ban list).
-  2. Query injury_status for active/resolving/chronic_baseline rows whose
+  2. Query the CURRENT injury_status rows (latest per location; a current
+     `resolved` row lifts that location, older rows are history) that are
+     active/resolving/chronic_baseline and whose
      contraindicated_exercises ban that identity or any name covering it
      (exercise_catalog.ban_match_names): a pre-split legacy name ("Bench
      Press" stored before "Dumbbell Bench Press" became its own identity)

@@ -20,6 +20,9 @@ class InjuryStatus(BaseModel):
     contraindicated_exercises: list[str] = Field(default_factory=list)
     safe_alternatives: list[str] = Field(default_factory=list)
     updated_at: datetime | None = None
+    # list_injuries only: True for the latest row of its location (the current
+    # state); False rows are history. None where it was not computed.
+    is_current: bool | None = None
 
 
 class InjurySeedResult(BaseModel):

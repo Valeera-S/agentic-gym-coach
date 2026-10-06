@@ -70,17 +70,43 @@ def _name_list(field: str, value: Any) -> list[str]:
     return list(value)
 
 
+# Order of injury_status rows, newest first. updated_at is the row's creation
+# time (rows are insert-only); rowid (insertion order) breaks a same-instant
+# tie so "latest" is deterministic.
+_NEWEST_FIRST = "ORDER BY updated_at DESC, rowid DESC"
+
+
+def _current_ids(rows: list[tuple]) -> set:
+    """ids of the CURRENT row per location: the first of each location in a
+    newest-first list. Older rows for a location are history (P34)."""
+    seen: set[str] = set()
+    current = set()
+    for row in rows:  # row = (id, location, ...)
+        if row[1] not in seen:
+            seen.add(row[1])
+            current.add(row[0])
+    return current
+
+
 def list_injuries(active_only: bool = False) -> list[InjuryStatus]:
-    """Injury rows as models, newest first (`active_only` skips resolved)."""
-    sql = f"SELECT id, {_COLS} FROM injury_status"
-    if active_only:
-        sql += " WHERE status <> 'resolved'"
-    sql += " ORDER BY updated_at DESC"
-    return [_row_to_model(r, with_id=True) for r in get_duckdb().execute(sql).fetchall()]
+    """Injury rows as models, newest first, history included — each flagged
+    `is_current` (the latest row for its location). `active_only` keeps only
+    current, non-resolved rows: a `resolved` row seeded later supersedes the
+    older `active` row for that location (P34)."""
+    rows = get_duckdb().execute(
+        f"SELECT id, {_COLS} FROM injury_status {_NEWEST_FIRST}").fetchall()
+    current = _current_ids(rows)
+    out = []
+    for r in rows:
+        model = _row_to_model(r, with_id=True).model_copy(update={"is_current": r[0] in current})
+        if active_only and not (model.is_current and model.status != InjuryState.resolved):
+            continue
+        out.append(model)
+    return out
 
 
 def get_active_injuries() -> list[InjuryStatus]:
-    """Non-resolved injuries — the Tier-1 working-memory slice."""
+    """Current, non-resolved injuries — the Tier-1 working-memory slice."""
     return list_injuries(active_only=True)
 
 
@@ -145,21 +171,24 @@ def blocked_by(name: str, ban_entries: Iterable[str | None]) -> bool:
 
 
 def _live_rows() -> list[tuple[str, str, list[str], list[str]]]:
-    """Non-resolved injury rows (newest first) as (location, status, bans, alts)."""
+    """CURRENT non-resolved injury rows (newest first) as (location, status,
+    bans, alts). Only the latest row per location is current; a current
+    `resolved` row lifts that location's bans, older rows are history (P34).
+    Feeds the gate and its alternatives filter."""
     rows = get_duckdb().execute(
-        """
-        SELECT location, status, contraindicated_exercises, safe_alternatives
-        FROM injury_status
-        WHERE status <> 'resolved'
-        ORDER BY updated_at DESC, rowid DESC
+        f"""
+        SELECT id, location, status, contraindicated_exercises, safe_alternatives
+        FROM injury_status {_NEWEST_FIRST}
         """
     ).fetchall()
+    current = _current_ids(rows)
     return [(loc, st, list(contra or []), [a for a in (alts or []) if a is not None])
-            for loc, st, contra, alts in rows]
+            for rid, loc, st, contra, alts in rows
+            if rid in current and st != "resolved"]
 
 
 def contraindication_hits(names: Iterable[str]) -> list[tuple[str, str, list[str]]]:
-    """Non-resolved injury rows (newest first) that ban any of `names`.
+    """Current non-resolved injury rows (newest first) that ban any of `names`.
 
     The safety gate's only sanctioned read of injury_status. A stored ban
     entry matches if its own text OR its current canonical identity equals one
@@ -189,8 +218,11 @@ def unbanned(candidates: Iterable[str]) -> list[str]:
 
 
 def tendon_summary() -> dict[str, Any]:
-    """{location: {status, severity}} for non-resolved injuries (snapshot anchor)."""
+    """{location: {status, severity}} for current non-resolved injuries (snapshot
+    anchor) — the same current rows the gate uses (P34)."""
     rows = get_duckdb().execute(
-        "SELECT location, status, severity FROM injury_status WHERE status <> 'resolved'"
+        f"SELECT id, location, status, severity FROM injury_status {_NEWEST_FIRST}"
     ).fetchall()
-    return {loc: {"status": st, "severity": sev} for loc, st, sev in rows}
+    current = _current_ids(rows)
+    return {loc: {"status": st, "severity": sev}
+            for rid, loc, st, sev in rows if rid in current and st != "resolved"}
