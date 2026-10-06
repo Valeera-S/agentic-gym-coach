@@ -122,6 +122,26 @@ def test_null_set_arrays_do_not_crash_readers_and_count_as_unrecorded(nulled):
     DISPATCH["session_detail"]({"date": str(today)})
 
 
+# --- P28: explode() states Polars' current empty-array behavior ---------------
+
+def test_empty_arrays_explode_to_one_null_row_without_polars_warnings():
+    import warnings
+    from skills.init import get_duckdb
+    from skills.snapshot import generate_phase_snapshot
+    today = date.today()
+    _log(today - timedelta(days=1), [40.0, 40.0, 40.0], name="Squat")
+    get_duckdb().execute(_NULL_ARRAY_UPDATE.format(
+        reps="[]::FLOAT[]", rpe="[]::FLOAT[]", weight="[]::DOUBLE[]"))
+    with warnings.catch_warnings():
+        # Polars 2.0 flips explode's empty_as_null default; the call sites pin
+        # today's value, so neither a warning nor a changed count may appear
+        warnings.simplefilter("error")
+        r = get_specialization_trend(MuscleGroup.quads, window_days=28, end_date=today)
+        generate_phase_snapshot()
+    assert r.effective_volume == pytest.approx(3.0)   # hard sets come from `sets`, not rows
+    assert r.detail["unloaded_sets"] == 1             # an empty array stays ONE null row
+
+
 # --- P29: window_days=N is exactly N calendar days ending at end_date ---------
 
 def test_window_includes_day_n_minus_1_before_end_and_excludes_day_n():

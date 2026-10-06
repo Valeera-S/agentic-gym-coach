@@ -311,7 +311,10 @@ def get_specialization_trend(
     )
 
     # --- per-set metrics (reference only) ----------------------------------
-    per_set = df.explode(["reps", "rpe", "weight_kg"])
+    # empty_as_null=True is Polars' CURRENT default (an empty array becomes one
+    # null row); stated so a Polars 2.0 default flip cannot silently change
+    # the per-set counts (P28)
+    per_set = df.explode(["reps", "rpe", "weight_kg"], empty_as_null=True)
     load_mult = (
         pl.when(pl.col("load_type").cast(pl.Utf8).is_in(_BOTH_LIMBS)).then(2.0).otherwise(1.0)
     )

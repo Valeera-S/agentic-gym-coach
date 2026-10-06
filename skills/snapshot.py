@@ -109,7 +109,8 @@ def _fetch_all_sets(start: date, end: date) -> pl.DataFrame:
 def _specialization_1rms(sets_df: pl.DataFrame) -> dict[str, float]:
     if sets_df.height == 0:
         return {}
-    per_set = sets_df.explode(["reps", "rpe", "weight_kg"])
+    # empty_as_null=True: the current Polars default, pinned for 2.0 (P28)
+    per_set = sets_df.explode(["reps", "rpe", "weight_kg"], empty_as_null=True)
     per_set = per_set.with_columns(
         pl.when(qualifies_for_est_1rm("weight_kg", "reps"))
         .then(epley_expr("weight_kg", "reps"))
