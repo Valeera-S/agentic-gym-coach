@@ -53,12 +53,6 @@ def list_readings(start: date, end: date) -> list[BodyweightReading]:
     return [_reading(r) for r in rows]
 
 
-class DailyConditionAverage(ConditionAverage):
-    """ConditionAverage that also reports the number of distinct DAYS behind
-    the mean (`readings` is the raw reading count)."""
-    days: int = 0
-
-
 def summarize(start: date, end: date) -> BodyweightSummary:
     """Mean kg per condition over start..end inclusive, plus how many readings
     and how many distinct days stand behind it.
@@ -73,7 +67,7 @@ def summarize(start: date, end: date) -> BodyweightSummary:
         "GROUP BY condition ORDER BY condition",
         [start, end]).fetchall()
     return BodyweightSummary(start=start, end=end, averages=[
-        DailyConditionAverage(condition=WeighCondition(c), readings=int(n), days=int(d),
+        ConditionAverage(condition=WeighCondition(c), readings=int(n), days=int(d),
                               mean_kg=round(float(m), 2))
         for c, n, d, m in rows])
 

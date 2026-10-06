@@ -437,10 +437,11 @@ def get_specialization_trend(
             ["date", "created_at", "sid"])
         first_ids = set(order["sid"].head(order.height // 2).to_list())
 
-        est_direction, _ = _est_1rm_direction(df, per_set, first_ids)
+        est_direction, est_verdicts = _est_1rm_direction(df, per_set, first_ids)
         if est_direction is not None:
             trend_direction = est_direction
             direction_basis = "est_1rm"
+            identity_directions = est_verdicts
         else:
             trend_direction, identity_directions = _performance_direction(
                 df, first_ids)
@@ -461,6 +462,6 @@ def get_specialization_trend(
             "unloaded_sets": unloaded,
             "overlap_sets": float(overlap_sets),
             "direction_basis": direction_basis,  # est_1rm | performance | None (<4 sessions)
-            "identity_directions": identity_directions,  # performance basis only
+            "identity_directions": identity_directions,  # one verdict per voting identity
         },
     )

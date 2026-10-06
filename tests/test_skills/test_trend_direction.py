@@ -266,7 +266,21 @@ def test_est_1rm_path_is_unchanged_when_heavy_sets_exist_in_both_halves():
     r = _trend(M.chest)
     assert r.detail["direction_basis"] == "est_1rm"
     assert r.trend_direction is TrendDirection.up
-    assert r.detail["identity_directions"] == {}
+    # P56: the est-1RM path names the identity that decided it too
+    assert r.detail["identity_directions"] == {"Barbell Bench Press": "up"}
+
+
+def test_est_1rm_path_lists_one_entry_per_voting_identity():
+    # bench votes (up), incline press votes (down); a cable fly only has light sets
+    # in one half, so it does not vote
+    for days_ago, bench, inc in ((13, 100.0, 60.0), (9, 100.0, 60.0), (5, 110.0, 50.0), (0, 110.0, 50.0)):
+        _log(days_ago, _ex("Barbell Bench Press", bench, 5, sets=4),
+             _ex("Dumbbell Incline Press", inc, 5, sets=2))
+    _log(0, _ex("Cable Fly", 20.0, 12, sets=3))
+    r = _trend(M.chest)
+    assert r.detail["direction_basis"] == "est_1rm"
+    assert r.detail["identity_directions"] == {"Barbell Bench Press": "up",
+                                               "Dumbbell Incline Press": "down"}
 
 
 def test_fewer_than_four_sessions_is_unknown():

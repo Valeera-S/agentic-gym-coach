@@ -84,9 +84,14 @@ class BodyweightReading(BaseModel):
 
 
 class ConditionAverage(BaseModel):
-    """Mean of ONE condition's readings over a window — never mixed."""
+    """Mean of ONE condition's readings over a window — never mixed.
+
+    The mean is of DAILY values (readings within one day are averaged first):
+    `readings` is the raw reading count, `days` the number of distinct days
+    behind the mean."""
     condition: WeighCondition
     readings: int
+    days: int
     mean_kg: float
 
 

@@ -312,3 +312,17 @@ def test_bodyweight_reading_dates_must_be_plausible(monkeypatch, bad):
         BodyweightInput(date=bad, condition="fed", weight_kg=80)
     for ok in (date(2000, 1, 1), date(2026, 10, 7)):
         assert BodyweightInput(date=ok, condition="fed", weight_kg=80).date == ok
+
+
+def test_condition_average_declares_days_and_the_tool_output_shows_it():
+    from coach_tools import DISPATCH
+    from models.bodyweight import ConditionAverage
+    assert "days" in ConditionAverage.model_fields
+    _log(0, 60.0)
+    _log(0, 62.0)
+    _log(1, 64.0)
+    out = DISPATCH["bodyweight_history"]({"end_date": TODAY.isoformat()})
+    (avg,) = out["window"]["averages"]
+    assert (avg["readings"], avg["days"], avg["mean_kg"]) == (3, 2, 62.5)
+    (avg7,) = out["last_7_days"]["averages"]
+    assert avg7["days"] == 2

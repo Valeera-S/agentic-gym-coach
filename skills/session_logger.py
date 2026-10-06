@@ -3,8 +3,8 @@
 Flow:
   1. Pydantic already validated `data` on construction (caller's job).
   2. Resolve `phase` if the user didn't set it — skills.phase.phase_for_logging
-     (current snapshot → modal training-session phase → maintenance default) so the
-     user never has to tag a phase.
+     (phase of the latest training session → latest snapshot, only when there is no
+     training session → maintenance default) so the user never has to tag a phase.
   3. Canonicalize each exercise: fill muscle_group from the catalog and
      store the canonical identity name, plus `raw_name` — what the caller
      actually typed.

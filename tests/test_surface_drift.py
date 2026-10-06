@@ -56,3 +56,11 @@ def test_persona_exposes_pre_recovery_score():
     assert "pre_recovery_score" in text
     sig = inspect.signature(mcp_server.coach_log_session)
     assert "pre_recovery_score" in sig.parameters
+
+
+def test_coach_trend_description_states_the_current_direction_rule():
+    import mcp_server
+    desc = mcp_server.coach_trend.__doc__
+    assert "per exercise identity" in desc and "chart primary" in desc
+    assert "identity_directions" in desc
+    assert "whenever heavy sets" not in desc and "when heavy sets exist in both halves" not in desc
