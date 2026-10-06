@@ -230,39 +230,39 @@ def _load_step(heavier_half: list[tuple[float, float]], heavier: tuple[float, fl
     return h >= l or math.isclose(h, l, rel_tol=1e-9, abs_tol=1e-9)
 
 
-def _is_bodyweight(name: str, stored_load_type: str | None) -> bool:
-    """Whether a null weight on this row means 'no external load' (counts as 0)
-    rather than 'not recorded' (unknown). Legacy rows (no stored load_type)
-    fall back to the identity's catalog default."""
-    if stored_load_type is not None:
-        return stored_load_type == LoadType.bodyweight.value
-    return default_load_type(name) is LoadType.bodyweight
-
-
-def _performance_direction(df: pl.DataFrame, muscle: str,
+def _performance_direction(df: pl.DataFrame,
                            first_ids: set) -> tuple[TrendDirection, dict[str, str]]:
-    """Double-progression direction for `muscle` from per-identity top sets."""
+    """Double-progression direction from per-identity top sets of the rows whose
+    `primary` flag is set (the muscle is a chart primary of the identity).
+
+    A null weight means 'no external load' (counts as 0) only for a bodyweight
+    row — stored load_type, else (legacy rows) the identity's catalog default —
+    otherwise it is 'not recorded' (unknown)."""
     halves: dict[str, tuple[list, list]] = {}
     weight: dict[str, float] = {}
     shown: dict[str, str] = {}
     bodyweight_keys: set[str] = set()
-    for sid, name, ident, mg, sets, reps, loads, mult, load_type in df.select(
-            "sid", "name", "identity", "mg", "hard_sets", "reps", "weight_kg", "form_mult",
-            "load_type").iter_rows():
-        if muscle not in progression_muscles(name, mg):
+    default_bw: dict[str, bool] = {}
+    # `key` / `primary` come from _with_direction_cols (the catalog lookups are
+    # cached there per distinct name, not repeated per row)
+    for sid, name, key, primary, ident, sets, reps, loads, mult, load_type in df.select(
+            "sid", "name", "key", "primary", "identity", "hard_sets", "reps", "weight_kg",
+            "form_mult", "load_type").iter_rows():
+        if not primary:
             continue  # overlap credit: volume only, never progression
-        bodyweight = _is_bodyweight(name, load_type)
+        if name not in default_bw:
+            default_bw[name] = default_load_type(name) is LoadType.bodyweight
+        bodyweight = (load_type == LoadType.bodyweight.value if load_type is not None
+                      else default_bw[name])
         reps = reps or []
         loads = loads or [None] * len(reps)
         pairs = [(0.0 if w is None else w, r) for r, w in zip(reps, loads)
                  if r is not None and (w is not None or bodyweight)]
-        # unknown names group case-insensitively ("meadows row" == "Meadows Row")
-        key = ident if resolve_name(name) else lookup_key(name)
         shown.setdefault(key, ident)
         # The load-step exclusion is per IDENTITY: a bodyweight exercise stays
         # one even when the caller declares an added-load reading ("total" for
         # a belt-weighted pull-up) — its true load still includes body mass.
-        if bodyweight or default_load_type(name) is LoadType.bodyweight:
+        if bodyweight or default_bw[name]:
             bodyweight_keys.add(key)
         first, second = halves.setdefault(key, ([], []))
         (first if sid in first_ids else second).extend(pairs)
@@ -443,7 +443,7 @@ def get_specialization_trend(
             direction_basis = "est_1rm"
         else:
             trend_direction, identity_directions = _performance_direction(
-                df, muscle.value, first_ids)
+                df, first_ids)
             direction_basis = "performance"
 
     stalled = trend_direction in (TrendDirection.plateau, TrendDirection.down)
