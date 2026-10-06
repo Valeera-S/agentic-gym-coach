@@ -179,7 +179,8 @@ def coach_session_amend(session_id: str, date: str, exercises: list[dict],
     one the user had set; confirm_muscle=true keeps it, a different muscle_group is your own
     choice), or any load_type copied from it, is not applied (flagged amend_not_applied where
     that changes the result).
-    Returns the session-level values now stored.
+    Returns the session-level values now stored, and `changed`: false (audit_id null, no audit
+    entry) when the session is stored exactly as before.
     The complete previous version is written to the audit trail. Unknown id -> invalid_input.
     """
     return _run("session_amend", {"session_id": session_id, "date": date, "exercises": exercises,

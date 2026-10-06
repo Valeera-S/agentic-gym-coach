@@ -514,7 +514,9 @@ class SessionChange(BaseModel):
 
     action: Literal["amended", "deleted", "restored"]
     session_id: UUID
-    audit_id: UUID                   # decision_log row holding the pre-change snapshot
+    audit_id: UUID | None            # decision_log row holding the pre-change snapshot
+    #                                  (None when an amend changed nothing: no entry is written)
+    changed: bool = True             # amend: False when the session would be stored byte-identically
     anomaly_flags: list[AnomalyFlag] = Field(default_factory=list)  # amend: as a fresh log
     # amend: every stored exercise the amend left out (its `index` was not
     # restated), so none disappears unreported; the full rows stay in the audit entry

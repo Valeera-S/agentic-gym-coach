@@ -534,11 +534,21 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
                WHERE id = ?""",
             [fresh.date, phase.value, fresh.kind.value, fresh.pre_recovery_score,
              fresh.post_feedback, structs, sid])
+        after = _snapshot(sid)
+        if after == before:
+            return None  # stored byte-identically: nothing to audit (P64a)
         return _audit(DecisionEventType.session_amend, sid, before,
                       f"amended: {len(before['exercises'] or [])} -> {len(structs)} exercise(s)",
-                      after=_snapshot(sid))
+                      after=after)
 
     audit_id = _in_transaction(work)
+    if audit_id is None:
+        return SessionChange(action="amended", session_id=sid, audit_id=None, changed=False,
+                             anomaly_flags=flags, phase=phase.value, kind=fresh.kind.value,
+                             pre_recovery_score=fresh.pre_recovery_score,
+                             post_feedback=fresh.post_feedback,
+                             message="nothing changed: the session is stored as it was "
+                                     "(no audit entry written)")
     message = "session amended; previous version audited"
     if removed:
         message += (f"; removed {len(removed)} stored exercise(s) not restated "
