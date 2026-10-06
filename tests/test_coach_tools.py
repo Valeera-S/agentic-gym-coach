@@ -88,7 +88,7 @@ def test_injuries_seed_via_dispatch_canonicalizes_and_gates():
     # The audit's done-when: messy spelling seeded through the real tool, then
     # the gate blocks the canonical query.
     out = cmd_injuries_seed({
-        "location": "left_elbow", "status": "active", "severity": "4",
+        "location": "left_elbow", "status": "active", "severity": 4,
         "contraindicated_exercises": ["Dumbbell Skull Crusher"],
         "safe_alternatives": ["Tricep Pushdown"],
     })

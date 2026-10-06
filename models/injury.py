@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 
 from .enums import InjuryState, PainLocation
 
@@ -16,7 +16,7 @@ class InjuryStatus(BaseModel):
     id: UUID | None = None
     location: PainLocation
     status: InjuryState
-    severity: int = Field(ge=0, le=10)
+    severity: StrictInt = Field(ge=0, le=10)
     contraindicated_exercises: list[str] = Field(default_factory=list)
     safe_alternatives: list[str] = Field(default_factory=list)
     updated_at: datetime | None = None
