@@ -23,6 +23,7 @@ from typing import Any
 
 from models import InjurySeedResult, InjuryState, InjuryStatus, PainLocation, canonicalize
 from models.exercise_catalog import ban_match_names, lookup_key, resolve_name
+from models.text import clean_name
 
 from .init import get_duckdb
 
@@ -67,6 +68,10 @@ def _name_list(field: str, value: Any) -> list[str]:
     for item in value:
         if not isinstance(item, str) or not item.strip():
             raise ValueError(f"{field} must contain only non-blank strings, got {item!r}")
+        try:
+            clean_name(item)  # valid UTF-8, no control characters, bounded (P66)
+        except ValueError as e:
+            raise ValueError(f"{field}: {e}") from None
     return list(value)
 
 

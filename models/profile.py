@@ -17,6 +17,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 
 from .enums import MuscleGroup
+from .text import clean_ident, clean_ident_list, clean_text, is_stored_read
 
 
 class GoalKind(str, Enum):
@@ -93,6 +94,12 @@ class AvailabilityWindow(BaseModel):
     end: str | None = None
     venue: str | None = None
 
+    @field_validator("venue")
+    @classmethod
+    def _clean_venue(cls, v: str | None, info) -> str | None:
+        # a short single-line string; what is already stored is read as is (P66)
+        return v if v is None or is_stored_read(info) else clean_ident(v, "venue")
+
     @field_validator("start", "end")
     @classmethod
     def _normalize_time(cls, v: str | None) -> str | None:
@@ -145,6 +152,12 @@ class Goal(BaseModel):
     @classmethod
     def _real_muscles_only(cls, v: list[MuscleGroup]) -> list[MuscleGroup]:
         return _no_sentinel(v)
+
+    @field_validator("metric", "notes")
+    @classmethod
+    def _clean_free_text(cls, v: str | None, info) -> str | None:
+        # free text: newline, carriage return, tab allowed; no surrogate (P66)
+        return v if v is None or is_stored_read(info) else clean_text(v, info.field_name)
 
 
 class UserProfile(BaseModel):
@@ -209,6 +222,23 @@ class UserProfile(BaseModel):
     @classmethod
     def _real_priorities_only(cls, v: list[MuscleGroup]) -> list[MuscleGroup]:
         return _no_sentinel(v)
+
+    @field_validator("display_name")
+    @classmethod
+    def _clean_short(cls, v: str | None, info) -> str | None:
+        return v if v is None or is_stored_read(info) else clean_ident(v, info.field_name)
+
+    @field_validator("liked_exercises", "disliked_exercises", "concurrent_sports")
+    @classmethod
+    def _clean_short_list(cls, v: list[str] | None, info) -> list[str] | None:
+        if v is None or is_stored_read(info):
+            return v
+        return clean_ident_list(v, info.field_name)
+
+    @field_validator("supplement_notes", "caffeine_intake")
+    @classmethod
+    def _clean_free_text(cls, v: str | None, info) -> str | None:
+        return v if v is None or is_stored_read(info) else clean_text(v, info.field_name)
 
 
 class MemoryNote(BaseModel):

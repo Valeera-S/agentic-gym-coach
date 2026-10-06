@@ -149,7 +149,9 @@ def error_payload(e: Exception) -> dict:
         code = "db"
     else:
         code = "internal"
-    return {"error": code, "exception": type(e).__name__, "detail": str(e)}
+    # an echoed input may hold a lone surrogate, which no client can encode: escape it
+    detail = str(e).encode("utf-8", "backslashreplace").decode("utf-8")
+    return {"error": code, "exception": type(e).__name__, "detail": detail}
 
 
 @_accepts(model="SessionInput")

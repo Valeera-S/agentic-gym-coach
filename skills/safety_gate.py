@@ -29,11 +29,14 @@ from __future__ import annotations
 
 from models import SafetyResult, canonicalize
 from models.exercise_catalog import ban_match_names
+from models.text import clean_name
 
 from .injuries import contraindication_hits, unbanned
 
 
 def check_exercise_safety(exercise: str) -> SafetyResult:
+    # a blank or malformed name is not a query: invalid_input, never "safe" (P66, P70)
+    clean_name(exercise)
     can_name, _mg, needs_review = canonicalize(exercise)
     # The identity plus every name whose ban covers it across the catalog's
     # identity split (legacy merged names, generic names) — fail-closed.

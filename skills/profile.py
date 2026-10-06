@@ -30,8 +30,8 @@ def get_profile() -> UserProfile | None:
     ).fetchone()
     if row is None:
         return None
-    p = UserProfile.model_validate_json(row[0])
-    return p
+    # context: rebuilt from what is stored; input-only hygiene rules do not apply
+    return UserProfile.model_validate_json(row[0], context={"stored": True})
 
 
 def set_profile(profile: UserProfile) -> UserProfile:
