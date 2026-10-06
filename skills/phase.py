@@ -21,7 +21,12 @@ from .init import get_duckdb
 
 def current_phase() -> PhaseType | None:
     """Latest snapshot's phase, else the modal phase across training sessions
-    (habits excluded), else None."""
+    (habits excluded), else None.
+
+    The modal phase is a total order: most sessions wins; a tie goes to the
+    phase whose latest session is most recent (the program moved there last);
+    a remaining tie goes to the phase name ascending. Deterministic for any
+    data (P25)."""
     row = get_duckdb().execute(
         "SELECT phase FROM phase_snapshots ORDER BY snapshot_date DESC LIMIT 1"
     ).fetchone()
@@ -29,9 +34,11 @@ def current_phase() -> PhaseType | None:
         return PhaseType(row[0])
     row = get_duckdb().execute(
         # training sessions only: one habit entry a day would otherwise
-        # outvote the program's actual phase
+        # outvote the program's actual phase. TOTAL order (P25): most
+        # sessions, then the phase of the latest session, then phase name —
+        # a tie must never fall to GROUP BY's arbitrary order.
         "SELECT phase FROM sessions WHERE kind = 'training' "
-        "GROUP BY phase ORDER BY count(*) DESC LIMIT 1"
+        "GROUP BY phase ORDER BY count(*) DESC, max(date) DESC, phase ASC LIMIT 1"
     ).fetchone()
     return PhaseType(row[0]) if row and row[0] else None
 

@@ -26,6 +26,31 @@ def test_modal_session_phase_is_fallback():
     assert current_phase() is PhaseType.cut
 
 
+def test_tied_modal_phase_resolves_to_most_recent_session():
+    # P25: equal session counts used to fall to GROUP BY's arbitrary order.
+    # Rule: most sessions, then the phase of the latest session. Check both
+    # insertion orders so neither the order nor the phase name can decide.
+    for first, second in ((PhaseType.cut, PhaseType.accumulation),
+                          (PhaseType.accumulation, PhaseType.cut)):
+        get_duckdb().execute("DELETE FROM sessions")
+        _log(date(2030, 3, 1), first)
+        _log(date(2030, 3, 2), first)
+        _log(date(2030, 3, 5), second)   # the latest session -> its phase wins
+        _log(date(2030, 3, 4), second)
+        assert current_phase() is second
+
+
+def test_tie_on_count_and_date_resolves_by_phase_name():
+    # fully tied: alphabetical by phase value, so the answer is repeatable
+    for order in ((PhaseType.cut, PhaseType.accumulation),
+                  (PhaseType.accumulation, PhaseType.cut)):
+        get_duckdb().execute("DELETE FROM sessions")
+        for p in order:
+            _log(D, p)
+        assert current_phase() is PhaseType.accumulation
+        assert current_phase() is current_phase()
+
+
 def test_latest_snapshot_wins_over_modal_sessions():
     _log(D, PhaseType.cut)
     get_duckdb().execute(
