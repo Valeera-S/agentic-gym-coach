@@ -35,6 +35,8 @@ you could say.
 **Logging**
 - `coach_log_session`: "Log today: Incline Bench 3x8 @ RPE 8, Lateral Raise 4x12 @ RPE 9." Pounds or kilos.
 - `coach_sessions` and `coach_session_detail`: "Show my last 5 sessions", "show me Tuesday's session exactly as I entered it."
+- `coach_session_template`: "Same as last back day, pulldown 65." Copies the last session with that label (loads in the unit you entered; RPE, pain and notes are never copied), you only state what differs.
+- `coach_session_labels`: "Which workouts do I have labels for?" Labels in use and how long since each was last logged (the coach uses it to ask once about daily habits).
 
 **Analysis**
 - `coach_trend`: "How are my side delts progressing?" Hard sets, avg RPE, est 1RM, trend direction, stall flag.

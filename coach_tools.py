@@ -231,6 +231,23 @@ def cmd_session_amend(args: dict):
     return amend_session(data).model_dump(mode="json")
 
 
+@_accepts("label", "session_id")
+def cmd_session_template(args: dict):
+    from skills.session_templates import session_template
+    label, session_id = args.get("label"), args.get("session_id")
+    for k, v in (("label", label), ("session_id", session_id)):
+        if v is not None and not isinstance(v, str):
+            raise ValueError(f"{k} must be a string")
+    return session_template(label=label, session_id=session_id).model_dump(mode="json")
+
+
+@_accepts()
+def cmd_session_labels(args: dict):
+    from skills.session_templates import session_labels
+    rows = [r.model_dump(mode="json") for r in session_labels()]
+    return {"labels": rows, "count": len(rows)}
+
+
 @_accepts("session_id")
 def cmd_session_delete(args: dict):
     from skills.sessions import delete_session
@@ -380,6 +397,8 @@ _HANDLERS = {
     "session_detail": cmd_session_detail,
     "session_amend": cmd_session_amend,
     "session_delete": cmd_session_delete,
+    "session_template": cmd_session_template,
+    "session_labels": cmd_session_labels,
     "bodyweight_log": cmd_bodyweight_log,
     "bodyweight_amend": cmd_bodyweight_amend,
     "bodyweight_delete": cmd_bodyweight_delete,

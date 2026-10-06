@@ -16,7 +16,7 @@ alembic upgrade head        # bootstrap data/gym_coach.duckdb
 
 ## MCP-capable runtimes (Claude Code, ZCode, Cursor, Codex CLI, Continue, …)
 
-`mcp_server.py` exposes all 20 coach tools + `coach_doctrine` (procedural
+`mcp_server.py` exposes all 22 coach tools + `coach_doctrine` (procedural
 disclosure over MCP) over stdio. All runtimes share this one server. Each tool
 call opens the DuckDB file and releases it on return, so an idle server never
 blocks `alembic`, the CLI or a second runtime.

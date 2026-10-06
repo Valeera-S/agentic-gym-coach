@@ -47,7 +47,7 @@ Volume currency = effective hard sets per muscle per week: sets × form_mult (fo
 
 4. SURFACES
 - CLI: python coach_tools.py <cmd> '<json>' (JSON stdout; {"error":...} + exit 1)
-- MCP: mcp_server.py (stdio; 20 coach tools + coach_doctrine) — the cross-runtime tool surface. Each tool call opens the DB and releases it on return (an idle server never locks the file).
+- MCP: mcp_server.py (stdio; 22 coach tools + coach_doctrine) — the cross-runtime tool surface. Each tool call opens the DB and releases it on return (an idle server never locks the file).
 - Persona: docs/COACH_PROMPT.md (canonical; renderable into native agent files via scripts/sync_adapters.py)
 - See docs/adapters.md. (The v1/v2 opencode native adapter was removed — MCP is the single tool surface.)
 

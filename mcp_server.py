@@ -87,8 +87,12 @@ def _run(cmd: str, args: dict) -> dict:
 def coach_log_session(date: str, exercises: list[dict], phase: str | None = None,
                       post_feedback: str | None = None,
                       pre_recovery_score: StrictInt | None = None,
-                      kind: str = coach_tools.DEFAULT_SESSION_KIND) -> dict:
+                      kind: str = coach_tools.DEFAULT_SESSION_KIND,
+                      label: str | None = None) -> dict:
     """Persist a session (validated, canonicalized, anomaly-flagged).
+
+    label: optional name of this recurring workout ('back day', 'Push'; one line, at most 40
+    characters); reuse an existing label (coach_session_labels) so "same as last time" can find it.
 
     kind: 'training' (default) | 'habit' — a standing daily item done outside
     training (e.g. 60 bodyweight squats every morning): it counts toward volume
@@ -105,7 +109,8 @@ def coach_log_session(date: str, exercises: list[dict], phase: str | None = None
     """
     return _run("log_session", {"date": date, "exercises": exercises,
                                 "phase": phase, "post_feedback": post_feedback,
-                                "pre_recovery_score": pre_recovery_score, "kind": kind})
+                                "pre_recovery_score": pre_recovery_score, "kind": kind,
+                                "label": label})
 
 
 @mcp.tool()
@@ -142,7 +147,7 @@ def coach_intake_status() -> dict:
 
 @mcp.tool()
 def coach_sessions(limit: StrictInt = coach_tools.DEFAULT_SESSIONS_LIMIT) -> dict:
-    """List recent sessions as {sessions, count} (each: id, date, phase, pre_recovery_score, post_feedback, kind, needs_review = number of exercises still needing review). Lean by design — use coach_session_detail for the exercises."""
+    """List recent sessions as {sessions, count} (each: id, date, phase, pre_recovery_score, post_feedback, kind, label, needs_review = number of exercises still needing review). Lean by design — use coach_session_detail for the exercises."""
     return _run("sessions", {"limit": limit})
 
 
@@ -168,14 +173,16 @@ def coach_session_amend(session_id: str, date: str, exercises: list[dict],
                         phase: str | None = None, kind: str | None = None,
                         post_feedback: str | None = None,
                         pre_recovery_score: StrictInt | None = None,
+                        label: str | None = None,
                         clear: list[str] | None = None) -> dict:
     """Replace a logged session's date and exercises (same id). ONLY after showing the user the
     current entry (coach_session_detail) and the correction, and getting their explicit yes.
 
     date + exercises replace the stored ones and are validated/canonicalized like a fresh log (exceptions below)
     (malformed input is rejected before any write). Every other field omitted OR null KEEPS its stored
-    value (phase, kind, post_feedback, pre_recovery_score) — pass one only to change it. To REMOVE a
-    stored post_feedback / pre_recovery_score, name it in `clear` (e.g. clear=["pre_recovery_score"]).
+    value (phase, kind, post_feedback, pre_recovery_score, label) — pass one only to change it. To REMOVE a
+    stored post_feedback / pre_recovery_score / label, name it in `clear` (e.g. clear=["label"]); a
+    field may not be both given and cleared.
     Exercises take the logging fields (name, sets, reps, rpe, weight_kg | weight + unit, load_type,
     tempo, form_quality, pain_flag, notes, muscle_group, confirm_muscle) plus EXACTLY ONE of
     `index` (the stored exercise it restates/edits, from coach_session_detail) or `new: true`;
@@ -199,7 +206,8 @@ def coach_session_amend(session_id: str, date: str, exercises: list[dict],
     """
     return _run("session_amend", {"session_id": session_id, "date": date, "exercises": exercises,
                                   "phase": phase, "kind": kind, "post_feedback": post_feedback,
-                                  "pre_recovery_score": pre_recovery_score, "clear": clear or []})
+                                  "pre_recovery_score": pre_recovery_score, "label": label,
+                                  "clear": clear or []})
 
 
 @mcp.tool()
@@ -208,6 +216,25 @@ def coach_session_delete(session_id: str) -> dict:
     to the user and getting their explicit confirmation. Its complete row is written to the audit
     trail first. Unknown id -> invalid_input."""
     return _run("session_delete", {"session_id": session_id})
+
+
+@mcp.tool()
+def coach_session_template(label: str | None = None, session_id: str | None = None) -> dict:
+    """"Same as last time": the most recent session with this label (case/spacing-insensitive),
+    or the given session_id — exactly one — as a ready-to-log payload {source_session_id,
+    source_date, label, kind, exercises, skipped}. exercises are coach_log_session inputs
+    (name, sets, reps, weight + unit as entered, load_type, tempo); rpe, pain_flag, notes,
+    form_quality are never copied — they are per-day. Edit only what the user said changed,
+    then coach_log_session. Unknown label -> invalid_input listing the labels in use."""
+    return _run("session_template", {"label": label, "session_id": session_id})
+
+
+@mcp.tool()
+def coach_session_labels() -> dict:
+    """Labels in use as {labels: [{label, kind, count, last_date, days_without_entry}], count},
+    most recent first. Reuse these instead of inventing a variant; for a habit label,
+    days_without_entry > 0 means days the user has not confirmed yet."""
+    return _run("session_labels", {})
 
 
 @mcp.tool()
