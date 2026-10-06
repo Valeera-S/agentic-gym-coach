@@ -107,3 +107,14 @@ def test_documented_subcommand_counts_equal_dispatch():
     for rel, n in stated:
         assert n == len(coach_tools.DISPATCH), (
             f"{rel} says {n} subcommands; DISPATCH has {len(coach_tools.DISPATCH)}")
+
+
+def test_persona_has_the_low_friction_logging_flow():
+    # UX3: the label / template / habit-confirmation behavior lives in the persona only
+    text = (_REPO / "docs" / "COACH_PROMPT.md").read_text(encoding="utf-8")
+    start = text.index("## Logging with little effort")
+    assert start < text.index("## Standardized intake assessment")
+    section = text[start:text.index("\n## ", start + 1)]
+    for needle in ("coach_session_labels", "coach_session_template", "coach_log_session",
+                   "days_without_entry", "14 days", "never copied"):
+        assert needle in section, needle
