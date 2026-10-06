@@ -128,7 +128,7 @@ def test_legacy_rows_read_back_with_unknown_provenance():
 
 def test_sessions_listing_gains_a_needs_review_count_and_stays_lean():
     _full_session()
-    (row,) = DISPATCH["sessions"]({})
+    (row,) = DISPATCH["sessions"]({})["sessions"]
     assert row["needs_review"] == 3
     assert "exercises" not in row  # lean by design (Tier-1 budget)
 

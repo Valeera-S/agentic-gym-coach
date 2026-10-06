@@ -190,7 +190,7 @@ def test_delete_affects_only_its_own_session():
     keep, drop = _log(), _log()
     DISPATCH["session_delete"]({"session_id": drop})
     assert _row(keep) is not None
-    assert [str(s["id"]) for s in DISPATCH["sessions"]({})] == [keep]
+    assert [str(s["id"]) for s in DISPATCH["sessions"]({})["sessions"]] == [keep]
 
 
 def test_deleting_twice_is_invalid_input_and_audits_once():
@@ -636,7 +636,7 @@ def test_detail_shows_every_stored_exercise_including_nameless_ones_with_their_i
 
 def test_listing_counts_nameless_entries_like_the_detail_does():
     sid = _session_with_nameless()
-    assert [s for s in DISPATCH["sessions"]({}) if str(s["id"]) == sid][0]["needs_review"] == 2
+    assert [s for s in DISPATCH["sessions"]({})["sessions"] if str(s["id"]) == sid][0]["needs_review"] == 2
 
 
 def test_amend_lists_every_stored_exercise_it_removed_nameless_ones_included():

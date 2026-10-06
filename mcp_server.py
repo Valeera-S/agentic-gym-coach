@@ -130,7 +130,7 @@ def coach_intake_status() -> dict:
 
 @mcp.tool()
 def coach_sessions(limit: int = coach_tools.DEFAULT_SESSIONS_LIMIT) -> dict:
-    """List recent sessions (id, date, phase, pre_recovery_score, post_feedback, kind, needs_review = number of exercises still needing review). Lean by design — use coach_session_detail for the exercises."""
+    """List recent sessions as {sessions, count} (each: id, date, phase, pre_recovery_score, post_feedback, kind, needs_review = number of exercises still needing review). Lean by design — use coach_session_detail for the exercises."""
     return _run("sessions", {"limit": limit})
 
 
@@ -214,7 +214,7 @@ def coach_bodyweight_history(window_days: int = coach_tools.DEFAULT_BODYWEIGHT_W
 
 @mcp.tool()
 def coach_injuries_list() -> dict:
-    """Read the injury_status table (location, status, severity, contraindications, alternatives)."""
+    """Read the injury_status table as {injuries, count} (each: location, status, severity, contraindications, alternatives)."""
     return _run("injuries_list", {})
 
 
@@ -255,7 +255,7 @@ def coach_memory_save(text: str,
 @mcp.tool()
 def coach_memory_search(query: str | None = None, tags: list[str] | None = None,
                         limit: int = coach_tools.DEFAULT_SEARCH_LIMIT) -> dict:
-    """Search long-term memory notes (substring AND any-tag, newest first)."""
+    """Search long-term memory notes (substring AND any-tag, newest first); returns {notes, count}."""
     return _run("memory_search", {"query": query, "tags": tags, "limit": limit})
 
 

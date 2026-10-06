@@ -95,7 +95,7 @@ def test_scope_that_never_touches_the_db_never_opens_it():
 
 def test_connections_reopen_after_release():
     coach_tools.DISPATCH["sessions"]({})
-    assert coach_tools.DISPATCH["sessions"]({}) == []
+    assert coach_tools.DISPATCH["sessions"]({}) == {"sessions": [], "count": 0}
 
 
 # --- cross-process -----------------------------------------------------------
@@ -141,7 +141,9 @@ def test_idle_mcp_server_does_not_lock_the_db(scratch_db):
         send({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
         first = call_sessions(2)
-        assert first["isError"] is False and first["content"] == []
+        # an empty listing is still content (P42): the client can tell "no rows" from a failed call
+        assert first["isError"] is False
+        assert json.loads(first["content"][0]["text"]) == {"sessions": [], "count": 0}
 
         # server is idle now: another process must be able to write
         con = duckdb.connect(str(scratch_db))
@@ -183,7 +185,7 @@ def test_genuine_collision_is_a_db_error_with_a_clear_detail(scratch_db):
         [sys.executable, "coach_tools.py", "sessions", "{}"],
         cwd=_REPO, env=_env_for(scratch_db), capture_output=True, text=True, timeout=60,
     )
-    assert ok.returncode == 0 and json.loads(ok.stdout) == []
+    assert ok.returncode == 0 and json.loads(ok.stdout) == {"sessions": [], "count": 0}
 
 
 def test_non_lock_io_error_is_not_reported_as_a_lock(tmp_path):
@@ -222,4 +224,4 @@ def test_concurrent_tool_calls_from_threads_do_not_interfere():
         results = list(pool.map(run, calls))  # re-raises any worker exception
     assert len(results) == len(calls)
     assert init._duck is None and init._scope_depth == 0
-    assert len(coach_tools.DISPATCH["memory_search"]({"limit": 1000})) == 1 + 20
+    assert coach_tools.DISPATCH["memory_search"]({"limit": 1000})["count"] == 1 + 20

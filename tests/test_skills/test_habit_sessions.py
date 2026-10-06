@@ -131,7 +131,7 @@ def test_kind_through_both_surfaces_and_listed_by_sessions():
     assert mcp_server.coach_log_session(date="2026-10-03",
                                         exercises=[{"name": "Lat Pulldown", "sets": 3}])
     listed = DISPATCH["sessions"]({})
-    assert [s["kind"] for s in listed] == ["habit", "training"]
+    assert [s["kind"] for s in listed["sessions"]] == ["habit", "training"]
 
 
 def _pulldown(d: date, kg: float) -> None:

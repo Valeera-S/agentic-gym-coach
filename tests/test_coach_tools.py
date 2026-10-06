@@ -68,7 +68,7 @@ def test_trend_default_still_applies():
 
 
 def test_sessions_limit_zero_ok_negative_rejected():
-    assert cmd_sessions({"limit": 0}) == []
+    assert cmd_sessions({"limit": 0}) == {"sessions": [], "count": 0}
     with pytest.raises(ValueError):
         cmd_sessions({"limit": -1})  # was a DuckDB BinderException shape
 
@@ -137,3 +137,31 @@ def test_intake_status_reports_missing_and_ready_flags():
     assert out["training_ready"] is False
     assert out["nutrition_ready"] is False
     assert "bodyweight_kg" in out["missing"]
+
+
+# --- list-returning tools return an object (P42) -------------------------------
+
+def test_list_tools_return_objects_even_when_empty():
+    """A bare empty list reaches an MCP client as EMPTY content, which cannot be
+    told from a failed call; every list-returning tool wraps its rows."""
+    assert DISPATCH["sessions"]({}) == {"sessions": [], "count": 0}
+    assert DISPATCH["injuries_list"]({}) == {"injuries": [], "count": 0}
+    assert DISPATCH["memory_search"]({}) == {"notes": [], "count": 0}
+
+
+def test_list_tools_count_matches_rows():
+    DISPATCH["memory_save"]({"text": "a"})
+    DISPATCH["memory_save"]({"text": "b"})
+    out = DISPATCH["memory_search"]({})
+    assert out["count"] == 2 == len(out["notes"])
+    DISPATCH["log_session"]({"date": "2026-01-05", "exercises": [{"name": "Squat", "sets": 1}]})
+    out = DISPATCH["sessions"]({})
+    assert out["count"] == 1 == len(out["sessions"])
+
+
+def test_no_argless_handler_returns_a_bare_list():
+    """Every handler's result is a dict or a model: the MCP wrappers are typed
+    `-> dict`, and an empty list would arrive as empty content."""
+    for name in ("sessions", "injuries_list", "memory_search", "profile_get",
+                 "intake_status", "snapshot", "bodyweight_history", "recovery"):
+        assert not isinstance(DISPATCH[name]({}), list), name
