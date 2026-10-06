@@ -204,3 +204,45 @@ def test_a_zero_weight_is_rejected_and_points_to_null_for_bodyweight(kw):
 
 def test_null_weight_still_means_bodyweight_or_unrecorded():
     assert ExerciseModel(name="Pull-Up", sets=2, weight_kg=[None, None]).weight_kg == [None, None]
+
+
+# --- dates must be plausible (P38) -----------------------------------------------------
+
+@pytest.fixture
+def clock(monkeypatch):
+    """Pin "today" for the plausibility window (no wall-clock dependence)."""
+    import models.dates
+    monkeypatch.setattr(models.dates, "today", lambda: date(2026, 10, 6))
+
+
+def _session_on(d):
+    return SessionInput(date=d, exercises=[ExerciseModel(name="Squat", sets=1)])
+
+
+@pytest.mark.parametrize("bad", [date(2099, 1, 1), date(1, 1, 1), date(1999, 12, 31),
+                                 date(2026, 10, 8), date(9999, 12, 31)])
+def test_implausible_session_dates_rejected(clock, bad):
+    with pytest.raises(Exception, match="plausible"):
+        _session_on(bad)
+
+
+@pytest.mark.parametrize("ok", [date(2000, 1, 1), date(2026, 10, 6), date(2026, 10, 7)])
+def test_plausible_session_dates_accepted_incl_one_day_slack(clock, ok):
+    assert _session_on(ok).date == ok
+
+
+def test_far_future_session_is_rejected_at_the_tool_and_never_stored(clock):
+    from coach_tools import DISPATCH, error_payload
+    with pytest.raises(ValueError) as exc:
+        DISPATCH["log_session"]({"date": "2099-01-01",
+                                 "exercises": [{"name": "Squat", "sets": 1}]})
+    assert error_payload(exc.value)["error"] == "invalid_input"
+    assert DISPATCH["sessions"]({})["count"] == 0
+
+
+def test_amend_date_is_checked_too(clock):
+    from models import SessionAmendInput
+    with pytest.raises(Exception, match="plausible"):
+        SessionAmendInput(session_id="00000000-0000-0000-0000-000000000001",
+                          date=date(2099, 1, 1),
+                          exercises=[dict(name="Squat", sets=1, new=True)])

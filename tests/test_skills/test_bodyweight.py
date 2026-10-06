@@ -280,3 +280,14 @@ def test_bodyweight_numbers_reject_booleans_and_numeric_strings(kw):
 
 def test_bodyweight_integer_number_still_accepted():
     assert BodyweightInput(date=date(2026, 10, 1), condition="fed", weight_kg=80).weight_kg == 80.0
+
+
+@pytest.mark.parametrize("bad", [date(2099, 1, 1), date(1, 1, 1), date(1999, 12, 31),
+                                 date(2026, 10, 8)])
+def test_bodyweight_reading_dates_must_be_plausible(monkeypatch, bad):
+    import models.dates
+    monkeypatch.setattr(models.dates, "today", lambda: date(2026, 10, 6))
+    with pytest.raises(ValidationError, match="plausible"):
+        BodyweightInput(date=bad, condition="fed", weight_kg=80)
+    for ok in (date(2000, 1, 1), date(2026, 10, 7)):
+        assert BodyweightInput(date=ok, condition="fed", weight_kg=80).date == ok

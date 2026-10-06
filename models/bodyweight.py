@@ -7,8 +7,9 @@ from datetime import date as Date, datetime
 from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .dates import check_plausible_date
 from .enums import WeightUnit
 from .session import LB_TO_KG, StrictNum
 
@@ -37,6 +38,11 @@ class BodyweightInput(BaseModel):
     weight_kg: StrictNum | None = None
     scale: str | None = None
     notes: str | None = None
+
+    @field_validator("date")
+    @classmethod
+    def _plausible_date(cls, v: Date) -> Date:
+        return check_plausible_date(v)
 
     @model_validator(mode="after")
     def _to_kg(self) -> "BodyweightInput":

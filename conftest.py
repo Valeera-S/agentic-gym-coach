@@ -47,6 +47,17 @@ def _init_test_schema():
     shutil.rmtree(_RUN_DIR, ignore_errors=True)
 
 
+@pytest.fixture(autouse=True)
+def _fixed_clock(monkeypatch):
+    """The input-date plausibility window (models/dates.py, P38) reads "today"
+    through models.dates.today(). Pin it far enough ahead that every fixture
+    date in the suite (real-today and the 2030-dated ones) is plausible, so no
+    test depends on the wall clock; tests of the window patch it themselves."""
+    import datetime
+    import models.dates
+    monkeypatch.setattr(models.dates, "today", lambda: datetime.date(2035, 1, 1))
+
+
 _TABLES = ("bodyweight_log", "sessions", "injury_status", "decision_log",
            "phase_snapshots", "user_profiles", "memory_notes")
 

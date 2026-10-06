@@ -13,6 +13,7 @@ from uuid import UUID
 from pydantic import (BaseModel, ConfigDict, Field, Strict, StrictBool, StrictInt,
                       field_validator, model_validator)
 
+from .dates import check_plausible_date
 from .enums import AnomalyCode, LoadType, MuscleGroup, PhaseType, SessionKind, WeightUnit
 
 # A JSON number only: a bool (`true` read as 1.0) or a numeric string ("80")
@@ -196,6 +197,11 @@ class SessionInput(BaseModel):
     post_feedback: str | None = None
     kind: SessionKind = SessionKind.training
 
+    @field_validator("date")
+    @classmethod
+    def _plausible_date(cls, v: date) -> date:
+        return check_plausible_date(v)
+
 
 class AnomalyFlag(BaseModel):
     """One anomaly raised during a log write."""
@@ -300,6 +306,11 @@ class SessionAmendInput(BaseModel):
     pre_recovery_score: StrictInt | None = Field(default=None, ge=0, le=100)
     post_feedback: str | None = None
     clear: list[Literal["post_feedback", "pre_recovery_score"]] = Field(default_factory=list)
+
+    @field_validator("date")
+    @classmethod
+    def _plausible_date(cls, v: date) -> date:
+        return check_plausible_date(v)
 
     @model_validator(mode="after")
     def _clear_or_set_not_both(self) -> "SessionAmendInput":
