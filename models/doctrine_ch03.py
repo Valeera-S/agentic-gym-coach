@@ -220,24 +220,25 @@ EXERCISE_PATTERN: dict[str, MovementPattern] = {
     "Smith Bench Press": _HP, "Machine Chest Press": _HP, "Close-Grip Bench Press": _HP,
     "Incline Bench Press": _HP, "Barbell Incline Bench Press": _HP,
     "Dumbbell Incline Press": _HP, "Smith Incline Press": _HP, "Machine Incline Press": _HP,
-    "Decline Push-Up": _HP, "Dip": _HP,
+    "Push-Up": _HP, "Decline Push-Up": _HP, "Dip": _HP,
     # book: "Vertical push (OHP)"
     "Shoulder Press": _VP, "Barbell Overhead Press": _VP,
     "Dumbbell Shoulder Press": _VP, "Machine Shoulder Press": _VP,
     # book: "Fly"
     "Fly": _FLY, "Dumbbell Fly": _FLY, "Cable Fly": _FLY, "Machine Fly": _FLY,
     # book: "Vertical pull (chins, lat pull)"
-    "Pull-Up": _VPULL, "Lat Pulldown": _VPULL, "Machine Lat Pulldown": _VPULL,
+    "Pull-Up": _VPULL, "Chin-Up": _VPULL, "Lat Pulldown": _VPULL, "Machine Lat Pulldown": _VPULL,
     # book: "Pullover / lat pushdown"
     "Straight Arm Pulldown": _PO,
     # book: "Horizontal pull (rows)"
-    "Row": _HPULL, "Pendlay Row": _HPULL, "Cable Row": _HPULL, "Machine Row": _HPULL,
+    "Row": _HPULL, "Barbell Row": _HPULL, "Dumbbell Row": _HPULL, "Pendlay Row": _HPULL, "Cable Row": _HPULL, "Machine Row": _HPULL,
     "Reverse Row": _HPULL, "Chest-Supported Dumbbell Row": _HPULL,
     # book: "Squat (all variants, leg press)"
     "Squat": _SQ, "Bulgarian Split Squat": _SQ, "Split Squat": _SQ, "Leg Press": _SQ,
-    "Bodyweight Squat": _SQ,
+    "Bodyweight Squat": _SQ, "Back Squat": _SQ, "Front Squat": _SQ,
     # book: "Hip hinge (deadlifts, good morning, back ext.)"
-    "Romanian Deadlift": _HH,
+    "Deadlift": _HH, "Conventional Deadlift": _HH, "Romanian Deadlift": _HH,
+    "Good Morning": _HH,
     # book: "Horizontal hip extension (thrust, bridge)"
     "Hip Thrust": _HHE, "Barbell Hip Thrust": _HHE, "Glute Bridge": _HHE,
     # Isolation — the book's catch-all row: the exercise's own target muscle only.
@@ -248,7 +249,7 @@ EXERCISE_PATTERN: dict[str, MovementPattern] = {
     "Dumbbell Skull Crusher": _ISO, "Hammer Curl": _ISO, "Bay Curl": _ISO, "Curl": _ISO,
     "Dumbbell Curl": _ISO, "Leg Extension": _ISO, "Leg Curl": _ISO, "Single-Leg Curl": _ISO,
     "Cable Kickback": _ISO, "Calf Raise": _ISO, "Smith Calf Raise": _ISO, "Crunch": _ISO,
-    "Machine Crunch": _ISO, "Hanging Leg Raise": _ISO, "Leg Raise": _ISO,
+    "Plank": _ISO, "Machine Crunch": _ISO, "Hanging Leg Raise": _ISO, "Leg Raise": _ISO,
     # HEURISTIC — the vendored training book never mentions face pulls (zero
     # grep hits) and no chart row covers them, so they take the catch-all
     # Isolation row with rear_delt as the target. No citation is claimed.
@@ -259,6 +260,11 @@ EXERCISE_PATTERN: dict[str, MovementPattern] = {
 # reasoned reading, labelled HEURISTIC, never cited as the book's own.
 HEURISTIC_CLASSIFICATIONS: dict[str, str] = {
     "Face Pull": "HEURISTIC: not in the book; routed to Isolation -> rear_delt.",
+    "Plank": (
+        "HEURISTIC: the chart has no core row and never names a plank; it takes "
+        "the catch-all Isolation row with core as the target, like Crunch. An "
+        "isometric hold is logged as one set; no book citation is claimed."
+    ),
     "Decline Push-Up": (
         "HEURISTIC: a feet-elevated (\"decline\") push-up presses at the angle "
         "of an incline press, so it keeps the chart's incline middle-delt credit."
@@ -292,7 +298,7 @@ _MD = frozenset({BookMuscle.middle_delts})
 DOCUMENTED_EXCEPTIONS: dict[str, DocumentedException] = {
     **{name: DocumentedException(_FLAT, drop=_MD) for name in (
         "Bench Press", "Barbell Bench Press", "Dumbbell Bench Press",
-        "Smith Bench Press", "Machine Chest Press")},
+        "Smith Bench Press", "Machine Chest Press", "Push-Up")},
     "Close-Grip Bench Press": DocumentedException(
         f"{_FLAT} {_TRI}", drop=_MD, primary=BookMuscle.triceps),
     "Dip": DocumentedException(f"{_FLAT} {_TRI}", drop=_MD, primary=BookMuscle.triceps),

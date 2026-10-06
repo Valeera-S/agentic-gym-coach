@@ -246,7 +246,7 @@ def test_null_entries_in_stored_alternatives_never_break_the_gate_or_the_list():
     ("Facepulls", M.rear_delt), ("Chins", M.lats), ("Leg Ext", M.quads),
     ("French Press", M.triceps), ("Rope Pressdown", M.triceps),
     ("Floor Press", M.chest), ("Decline Dumbbell Press", M.chest), ("Block Pull", M.glutes),
-    ("Lateral Lunge", M.quads), ("Reverse Lunge", M.quads), ("Bent Over Row", M.lats),
+    ("Lateral Lunge", M.quads), ("Reverse Lunge", M.quads), ("Bent Over T-Bar Row", M.lats),
 ])
 def test_keyword_precedence_round_two(name, muscle):
     c = classify(name)
@@ -291,7 +291,7 @@ def test_pathological_names_classify_fast():
 @pytest.mark.parametrize("name, muscle", [
     # abdominals before every chest word (round 3)
     ("Decline Crunch", M.core), ("Decline Sit-Up", M.core), ("Bench Crunch", M.core),
-    ("Incline Plank", M.core), ("Forearm Plank", M.core),
+    ("Incline Plank", M.core), ("Side Plank", M.core),
     # behind-the-neck lifts are not neck work
     ("Behind the Neck Pulldown", M.lats), ("Behind Neck Lat Pulldown", M.lats),
     ("Behind-the-Neck Press", M.front_delt),

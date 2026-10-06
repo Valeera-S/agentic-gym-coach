@@ -66,7 +66,7 @@ _ENTRIES: tuple[Exercise, ...] = (
     # --- horizontal push ------------------------------------------------------
     Exercise("Bench Press", ("Flat Bench Press", "Flat Bench"), generic=True,
              variants=("Barbell Bench Press", "Dumbbell Bench Press", "Smith Bench Press",
-                       "Machine Chest Press", "Close-Grip Bench Press")),
+                       "Machine Chest Press", "Close-Grip Bench Press", "Push-Up")),
     Exercise("Barbell Bench Press", ("Flat Barbell Bench Press", "Barbell Flat Bench Press",
                                      "BB Bench Press"), TOT),
     Exercise("Dumbbell Bench Press", ("Flat Dumbbell Press", "Flat Dumbbell Bench Press",
@@ -85,6 +85,10 @@ _ENTRIES: tuple[Exercise, ...] = (
     Exercise("Smith Incline Press", ("Smith Machine Incline Press",
                                      "Smith Incline Bench Press"), TOT),
     Exercise("Machine Incline Press", ("Incline Chest Press Machine",), MS),
+    # Flat push-up: the ch03 horizontal-push row. A ban on the generic "Bench Press"
+    # also blocks it (listed in that generic's variants) — fail-closed: a user who
+    # cannot press loads horizontally rarely means push-ups are fine.
+    Exercise("Push-Up", ("Pushup",), BW),
     Exercise("Decline Push-Up", ("Decline Pushup", "Feet-Elevated Push-Up"), BW),
     Exercise("Dip", ("Dips", "Parallel Bar Dip"), BW),
     # --- vertical push --------------------------------------------------------
@@ -104,6 +108,8 @@ _ENTRIES: tuple[Exercise, ...] = (
     Exercise("Machine Fly", ("Pec Deck", "Pec Deck Fly", "Machine Chest Fly"), MS),
     # --- vertical pull --------------------------------------------------------
     Exercise("Pull-Up", ("Pullup", "Close Grip Pull-Up"), BW),
+    # Supinated-grip pull-up; the chart's "chins" are named beside "lat pull".
+    Exercise("Chin-Up", ("Chinup",), BW),
     Exercise("Lat Pulldown", ("Pulldown", "Cable Pulldown", "Wide Grip Pulldown",
                               "Neutral Grip Pulldown", "Lat Pull-Down"), MS),
     # A converging-arm (iso-lateral) pulldown machine: a different machine from
@@ -115,7 +121,9 @@ _ENTRIES: tuple[Exercise, ...] = (
     # --- horizontal pull ------------------------------------------------------
     Exercise("Row", ("Wide Grip Row",), generic=True,
              variants=("Pendlay Row", "Cable Row", "Machine Row", "Reverse Row",
-                       "Chest-Supported Dumbbell Row")),
+                       "Chest-Supported Dumbbell Row", "Barbell Row", "Dumbbell Row")),
+    Exercise("Barbell Row", ("Bent Over Row", "Barbell Bent Over Row", "BB Row"), TOT),
+    Exercise("Dumbbell Row", ("One Arm Dumbbell Row", "Single Arm Dumbbell Row", "DB Row"), PH),
     Exercise("Pendlay Row", ("Penlay Row",), TOT),
     Exercise("Cable Row", ("Seated Cable Row", "Neutral Grip Cable Row",
                            "Wide Grip Cable Row"), MS),
@@ -127,13 +135,20 @@ _ENTRIES: tuple[Exercise, ...] = (
     Exercise("Reverse Row", ("Wide Grip Reverse Row",)),
     # --- squat ----------------------------------------------------------------
     Exercise("Squat", (), generic=True,
-             variants=("Bulgarian Split Squat", "Split Squat", "Bodyweight Squat")),
+             variants=("Bulgarian Split Squat", "Split Squat", "Bodyweight Squat",
+                       "Back Squat", "Front Squat")),
+    Exercise("Back Squat", ("Barbell Back Squat", "High Bar Squat", "Low Bar Squat"), TOT),
+    Exercise("Front Squat", ("Barbell Front Squat",), TOT),
     Exercise("Bulgarian Split Squat", ()),
     Exercise("Split Squat", ()),
     Exercise("Bodyweight Squat", ("Air Squat", "BW Squat"), BW),
     Exercise("Leg Press", (), TOT),
     # --- hip hinge ------------------------------------------------------------
+    Exercise("Deadlift", (), generic=True,
+             variants=("Conventional Deadlift", "Romanian Deadlift")),
+    Exercise("Conventional Deadlift", ("Barbell Deadlift",), TOT),
     Exercise("Romanian Deadlift", ("RDL",)),
+    Exercise("Good Morning", ("Barbell Good Morning",), TOT),
     # --- horizontal hip extension ---------------------------------------------
     Exercise("Hip Thrust", (), generic=True, variants=("Barbell Hip Thrust",)),
     Exercise("Barbell Hip Thrust", (), TOT),
@@ -169,6 +184,8 @@ _ENTRIES: tuple[Exercise, ...] = (
     Exercise("Calf Raise", (), target=M.calves, generic=True, variants=("Smith Calf Raise",)),
     Exercise("Smith Calf Raise", (), TOT, M.calves),
     Exercise("Crunch", (), BW, M.core),
+    # HEURISTIC — see doctrine_ch03.HEURISTIC_CLASSIFICATIONS: the chart has no core row.
+    Exercise("Plank", ("Front Plank", "Forearm Plank"), BW, M.core),
     Exercise("Machine Crunch", (), MS, M.core),
     Exercise("Hanging Leg Raise", (), BW, M.core),
     Exercise("Leg Raise", ("Lying Leg Raise",), BW, M.core),
