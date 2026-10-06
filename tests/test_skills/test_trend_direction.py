@@ -339,3 +339,32 @@ def test_a_declared_total_with_null_weights_is_still_unrecorded():
     for days_ago in (13, 9, 5, 0):
         _log(days_ago, ExerciseModel(name="Pull-Up", sets=3, reps=[8] * 3, load_type="total"))
     assert _trend(M.lats).trend_direction is TrendDirection.unknown
+
+
+# --- P49: sessions are counted by id; halves split by session order -----------
+
+def test_two_training_sessions_on_one_day_count_as_two():
+    for days_ago in (1, 0):
+        _log(days_ago, _ex("Lat Pulldown", 50.0, 10))
+        _log(days_ago, _ex("Lat Pulldown", 50.0, 10))
+    r = _trend(M.lats)
+    assert r.sessions_in_window == 4
+    assert r.trend_direction is TrendDirection.plateau and r.stalled is True
+
+
+def test_halves_are_the_first_floor_n_over_2_sessions_not_halves_of_dates():
+    # sessions in order: 20, 30 | 30, 20 -> equal tops -> plateau. Splitting the
+    # distinct DATES instead (D-1 | D) would read 20 -> 30 as `up`.
+    _log(1, _ex("Lat Pulldown", 20.0, 10))
+    for kg in (30.0, 30.0, 20.0):
+        _log(0, _ex("Lat Pulldown", kg, 10))
+    r = _trend(M.lats)
+    assert r.sessions_in_window == 4
+    assert r.trend_direction is TrendDirection.plateau
+
+
+def test_habit_sessions_are_not_counted_as_sessions():
+    for days_ago in (3, 2, 1, 0):
+        _log(days_ago, _ex("Lat Pulldown", 50.0, 10))
+    log_session(SessionInput(date=END, kind="habit", exercises=[_ex("Lat Pulldown", 50.0, 10)]))
+    assert _trend(M.lats).sessions_in_window == 4

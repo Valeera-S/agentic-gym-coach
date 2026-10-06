@@ -28,6 +28,11 @@ est_1rm_kg: Epley over sets with reps <= 6 only ("estimate 1RM only from
 anywhere: Epley at 12+ reps is badly off, and a number shown beside the
 correctly-null est_1rm_kg would read as usable.
 
+Window halves and session counting: `sessions_in_window` is the number of distinct
+TRAINING session ids (two sessions on one day are two). The halves are by
+training-session order — (date, created_at, id) — the first floor(n/2) sessions
+vs the rest; never halves of the distinct dates.
+
 trend_direction: est-1RM trend across window halves when qualifying heavy
 sets exist in both halves (±2%). Otherwise — the usual hypertrophy case, most
 sets in the 6-12 range (ch03) — direction is judged on PERFORMANCE per
@@ -122,11 +127,11 @@ PADDED_SET_ARRAYS_SQL = """
 def _fetch_entries(start: date, end: date) -> pl.DataFrame:
     """Entry-level rows: one row per exercise within a session."""
     sql = f"""
-        SELECT date, kind, name, mg, sets, form_quality, load_type, {PADDED_SET_ARRAYS_SQL}
+        SELECT sid, created_at, date, kind, name, mg, sets, form_quality, load_type, {PADDED_SET_ARRAYS_SQL}
         FROM (
           SELECT *, {SET_COUNT_SQL}
           FROM (
-            SELECT s.date,
+            SELECT CAST(s.id AS VARCHAR) AS sid, s.created_at AS created_at, s.date,
                    s.kind AS kind,
                    UNNEST(s.exercises).name AS name,
                    CAST(UNNEST(s.exercises).muscle_group AS VARCHAR) AS mg,
@@ -228,14 +233,14 @@ def _is_bodyweight(name: str, stored_load_type: str | None) -> bool:
 
 
 def _performance_direction(df: pl.DataFrame, muscle: str,
-                           first_dates: set) -> tuple[TrendDirection, dict[str, str]]:
+                           first_ids: set) -> tuple[TrendDirection, dict[str, str]]:
     """Double-progression direction for `muscle` from per-identity top sets."""
     halves: dict[str, tuple[list, list]] = {}
     weight: dict[str, float] = {}
     shown: dict[str, str] = {}
     bodyweight_keys: set[str] = set()
-    for d, name, ident, mg, sets, reps, loads, mult, load_type in df.select(
-            "date", "name", "identity", "mg", "hard_sets", "reps", "weight_kg", "form_mult",
+    for sid, name, ident, mg, sets, reps, loads, mult, load_type in df.select(
+            "sid", "name", "identity", "mg", "hard_sets", "reps", "weight_kg", "form_mult",
             "load_type").iter_rows():
         if muscle not in progression_muscles(name, mg):
             continue  # overlap credit: volume only, never progression
@@ -253,7 +258,7 @@ def _performance_direction(df: pl.DataFrame, muscle: str,
         if bodyweight or default_load_type(name) is LoadType.bodyweight:
             bodyweight_keys.add(key)
         first, second = halves.setdefault(key, ([], []))
-        (first if d in first_dates else second).extend(pairs)
+        (first if sid in first_ids else second).extend(pairs)
         weight[key] = weight.get(key, 0.0) + (sets or 0) * mult
 
     verdicts: dict[str, str] = {}
@@ -349,15 +354,16 @@ def get_specialization_trend(
     is_training = pl.col("kind").fill_null("training") != "habit"
     df = df.filter(is_training)
     per_set = per_set.filter(is_training)
-    sessions = df["date"].unique().sort().len()
+    sessions = df["sid"].n_unique()
     trend_direction = TrendDirection.unknown
     direction_basis: str | None = None
     identity_directions: dict[str, str] = {}
     if sessions >= 4:
-        dates = df["date"].unique().sort()
-        mid = dates.len() // 2
-        first_dates = set(dates.head(mid).to_list())
-        in_first = pl.col("date").is_in(list(first_dates))
+        # halves by training-session order: (date, created_at, id), first n//2 vs the rest
+        order = df.select("sid", "date", "created_at").unique(subset="sid").sort(
+            ["date", "created_at", "sid"])
+        first_ids = set(order["sid"].head(order.height // 2).to_list())
+        in_first = pl.col("sid").is_in(list(first_ids))
 
         tf_est = per_set.filter(in_first & qualifies).select(
             epley_expr("weight_kg", "reps").max()
@@ -376,7 +382,7 @@ def get_specialization_trend(
             direction_basis = "est_1rm"
         else:
             trend_direction, identity_directions = _performance_direction(
-                df, muscle.value, first_dates)
+                df, muscle.value, first_ids)
             direction_basis = "performance"
 
     stalled = trend_direction in (TrendDirection.plateau, TrendDirection.down)
