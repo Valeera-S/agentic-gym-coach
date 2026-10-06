@@ -72,18 +72,19 @@ def test_ahead_db_says_update_code(scratch):
     assert "Do NOT downgrade" in out["detail"]
 
 
-@pytest.mark.parametrize("version_table", [False, True])
-def test_empty_db_says_create(scratch, version_table):
-    if version_table:
-        _stamp(scratch, None)
+def test_empty_alembic_version_table_says_create(scratch):
+    # tables exist (just the version table, no row): never bootstrapped over
+    _stamp(scratch, None)
     out = _call("sessions")
     assert out["error"] == "db"
     assert "alembic upgrade head" in out["detail"] and "create" in out["detail"]
 
 
 def test_upgrade_after_failure_heals_without_restart(scratch):
-    assert _call("sessions")["error"] == "db"  # empty file
+    _stamp(scratch, None)
+    assert _call("sessions")["error"] == "db"  # version table without a row
     init.close_all()
+    scratch.unlink()
     _upgrade(scratch)
     assert "error" not in _call("sessions")
 

@@ -92,7 +92,9 @@ Python 3.11+ · DuckDB · Polars · Pydantic V2 · Alembic · MCP
 
 ```bash
 uv venv .venv && uv pip install -r requirements.txt
-alembic upgrade head      # bootstrap data/gym_coach.duckdb
+# the first coach tool call creates data/gym_coach.duckdb by itself; only the
+# optional bulk import below needs the database to exist already, so run
+# `alembic upgrade head` first if you want it before the Coach has started
 python scripts/ingest_log.py --reset   # optional: import historical log.md
 ```
 
@@ -110,14 +112,18 @@ python scripts/ingest_log.py --reset   # optional: import historical log.md
   ```
 
   and use `.venv\Scripts\python.exe` wherever the docs say `.venv/bin/python`.
-- **Migrations:** after updating, run `alembic upgrade head` (it is safe while
+- **First run:** nothing to do — the first coach tool call creates
+  `data/gym_coach.duckdb` and applies every migration when the file is missing
+  or empty (`alembic upgrade head` still works if you prefer to do it by hand).
+  An existing database is never migrated automatically.
+- **Migrations (upgrades):** after updating, run `alembic upgrade head` (it is safe while
   the MCP server sits idle — the server releases the DB between calls), then
   restart the runtime so the MCP server loads the new code.
 
 ## Running tests
 
 ```bash
-python -m pytest -q          # 1295 tests
+python -m pytest -q          # 1303 tests
 python -m pytest -m slow -q  # 3 perf guards on 10K-row synthetic sets
 ```
 

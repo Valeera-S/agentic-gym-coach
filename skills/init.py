@@ -157,13 +157,78 @@ def _schema_message(found: str | None) -> str:
             "version). Do NOT downgrade the database. No tool ran and nothing was changed.")
 
 
+# --- first-run bootstrap ------------------------------------------------------
+# A brand-new user has no database at all. Rather than make them run alembic
+# first, the first tool call creates it — but ONLY when there is provably
+# nothing to lose: the file does not exist, or it holds no tables whatsoever.
+# A DB behind/ahead of head, or with tables but no alembic_version, is never
+# touched (no auto-migrate: AGENTS.md).
+
+def _run_alembic_upgrade(path: Path) -> None:
+    """`alembic upgrade head` against `path` through the command API.
+
+    Built without alembic.ini on purpose: env.py then skips fileConfig (no
+    logging reconfiguration inside a long-lived server) and the explicit URL is
+    the target. env.py creates the parent directory and uses NullPool, so the
+    file is released when this returns."""
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(_REPO_ROOT / "migrations").replace("%", "%%"))
+    cfg.set_main_option("sqlalchemy.url", f"duckdb:///{path}".replace("%", "%%"))
+    command.upgrade(cfg, "head")
+
+
+def _bootstrap(path: Path) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _run_alembic_upgrade(path)
+    except Exception as e:  # any failure is a `db` error, never a silent half-DB
+        raise SchemaMismatchError(
+            f"First run: creating the database {path} with `alembic upgrade head` failed "
+            f"({type(e).__name__}: {e}). The file may be half-created. Recovery: delete "
+            f"{path} (it held no data before this first run), then retry; or run "
+            "`alembic upgrade head` from the repository root to see the full error. "
+            "No tool ran."
+        ) from e
+
+
+def _is_empty_database(con: duckdb.DuckDBPyConnection) -> bool:
+    return con.execute("SELECT count(*) FROM information_schema.tables").fetchone()[0] == 0
+
+
+def _bootstrap_if_first_run() -> None:
+    """Create the schema when the configured DB file is missing or completely empty.
+
+    Never runs while this process already holds a connection to the file (alembic
+    would collide with it) and never touches a DB that has any table."""
+    global _duck
+    if _duck is not None:
+        return
+    path = _DUCK_PATH
+    # decided BEFORE any connection is opened: opening DuckDB creates the file
+    if not path.exists() or (path.is_file() and path.stat().st_size == 0):
+        if path.exists():
+            path.unlink()  # a 0-byte file is not a valid DuckDB file; it holds nothing
+        _bootstrap(path)
+        return
+    con = get_duckdb()
+    empty = _is_empty_database(con)
+    if empty:
+        _close_duckdb()  # release our handle before alembic opens the file
+        _bootstrap(path)
+
+
 def ensure_schema_current() -> None:
     """Raise SchemaMismatchError unless the DB is at REQUIRED_SCHEMA_REVISION.
 
+    A missing or completely empty DB is first bootstrapped to head (first run).
     Cached per DB path once it passes; re-checked on every call while it fails."""
     key = str(_DUCK_PATH)
     if key in _schema_ok:
         return
+    _bootstrap_if_first_run()
     con = get_duckdb()
     has_table = con.execute(
         "SELECT count(*) FROM information_schema.tables WHERE table_name = 'alembic_version'"
