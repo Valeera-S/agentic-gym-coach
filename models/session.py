@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 from datetime import date, datetime
+from datetime import date as _Date  # alias: a `date` field shadows the type in class bodies
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -444,9 +445,12 @@ class AmendExerciseModel(ExerciseModel):
 class SessionAmendInput(BaseModel):
     """What coach_session_amend takes: a session's new content.
 
-    `date` and `exercises` replace the stored ones wholesale and are
-    re-validated and re-canonicalized like a fresh log, except for the stored
-    provenance a restatement keeps (below). Every other
+    `date` and `exercises`, when given, replace the stored ones wholesale and
+    are re-validated and re-canonicalized like a fresh log, except for the
+    stored provenance a restatement keeps (below). Omitted (or null) they KEEP
+    the stored value exactly (stored exercises byte-identical, so a label or
+    post_feedback can be amended alone, P79); an EMPTY exercise list is
+    invalid. Every other
     field is optional and, when omitted OR null, KEEPS its stored value —
     correcting a session's exercises must never silently clear the user's
     feedback or recovery score, or turn a habit into training. Removing a
@@ -460,8 +464,8 @@ class SessionAmendInput(BaseModel):
     """
 
     session_id: UUID
-    date: date
-    exercises: list[AmendExerciseModel]
+    date: _Date | None = None
+    exercises: list[AmendExerciseModel] | None = None
     phase: PhaseType | None = None
     kind: SessionKind | None = None
     pre_recovery_score: StrictInt | None = Field(default=None, ge=0, le=100)
@@ -477,7 +481,9 @@ class SessionAmendInput(BaseModel):
 
     @field_validator("date")
     @classmethod
-    def _plausible_date(cls, v: date, info) -> date:
+    def _plausible_date(cls, v: date | None, info) -> date | None:
+        if v is None:
+            return v  # omitted / null: the stored date is kept (P79)
         stored = (info.context or {}).get("stored_date")
         if stored is not None and v == stored:
             return v  # restating the stored date unchanged is not re-checked (P58)
@@ -485,7 +491,10 @@ class SessionAmendInput(BaseModel):
 
     @field_validator("exercises")
     @classmethod
-    def _amend_needs_exercises(cls, v: list[AmendExerciseModel]) -> list[AmendExerciseModel]:
+    def _amend_needs_exercises(
+            cls, v: list[AmendExerciseModel] | None) -> list[AmendExerciseModel] | None:
+        if v is None:
+            return v  # omitted / null: the stored exercises are kept untouched (P79)
         if not v:
             raise ValueError(
                 "exercises is empty: an amend replaces the session's exercises, so an empty "
@@ -500,7 +509,7 @@ class SessionAmendInput(BaseModel):
 
     @model_validator(mode="after")
     def _clear_or_set_not_both(self) -> "SessionAmendInput":
-        indexes = [ex.index for ex in self.exercises if ex.index is not None]
+        indexes = [ex.index for ex in self.exercises or [] if ex.index is not None]
         if len(indexes) != len(set(indexes)):
             raise ValueError("an `index` may be referenced by one amend exercise only")
         for name in self.clear:

@@ -496,6 +496,7 @@ def _stored_flags(e: dict | None, index: int) -> list[AnomalyFlag]:
 def amend_session(data: SessionAmendInput) -> SessionChange:
     """Replace a session's date and exercises, keeping its id (and created_at).
 
+    `date` / `exercises` omitted (or null) keep the stored value exactly (P79).
     The new content goes through prepare_session(), like a fresh log,
     except that an exercise restating a stored one keeps its stored
     provenance (_provenance_to_keep). Fields left out or null (phase, kind,
@@ -506,15 +507,17 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
     before = _snapshot(sid)
     if before is None:
         raise ValueError(f"no session with id {sid}")
-    removed = _removed(before["exercises"], data.exercises)
+    # exercises omitted (P79): every stored exercise is kept byte-identical
+    given = data.exercises if data.exercises is not None else []
+    removed = _removed(before["exercises"], given) if data.exercises is not None else []
     # exercises restated unchanged that today's input rules reject (legacy rows,
     # P58) are kept exactly as stored; everything else is prepared as a fresh log
-    live = [ex for ex in data.exercises if not ex.keep_stored]
+    live = [ex for ex in given if not ex.keep_stored]
     keep, carry_flags = _provenance_to_keep(live, before["exercises"])
     # model_construct: kept stored values (a legacy date, post_feedback, ...) are
     # not re-checked; every value the caller sent was validated at parse time
     fresh = SessionInput.model_construct(
-        date=data.date, exercises=live,
+        date=data.date or date.fromisoformat(before["date"]), exercises=live,
         phase=data.phase or (PhaseType(before["phase"]) if before["phase"] else None),
         kind=SessionKind(data.kind or before["kind"]),
         pre_recovery_score=_amended(data, "pre_recovery_score", before),
@@ -525,7 +528,11 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
     flags = carry_flags + flags
     prepared_iter = iter(prepared)
     structs = []
-    for ex in data.exercises:
+    if data.exercises is None:
+        structs = before["exercises"]
+        for i, e in enumerate(structs or []):
+            flags = flags + _stored_flags(e, i)
+    for ex in given:
         if ex.keep_stored:
             structs.append(dict(before["exercises"][ex.index]))
             flags = flags + _stored_flags(before["exercises"][ex.index], ex.index)
@@ -543,7 +550,7 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
         if after == before:
             return None  # stored byte-identically: nothing to audit (P64a)
         return _audit(DecisionEventType.session_amend, sid, before,
-                      f"amended: {len(before['exercises'] or [])} -> {len(structs)} exercise(s)",
+                      f"amended: {len(before['exercises'] or [])} -> {len(structs or [])} exercise(s)",
                       after=after)
 
     audit_id = _in_transaction(work)

@@ -169,16 +169,18 @@ def coach_session_detail(session_id: str | None = None, date: str | None = None)
 
 
 @mcp.tool()
-def coach_session_amend(session_id: str, date: str, exercises: list[dict],
+def coach_session_amend(session_id: str, date: str | None = None,
+                        exercises: list[dict] | None = None,
                         phase: str | None = None, kind: str | None = None,
                         post_feedback: str | None = None,
                         pre_recovery_score: StrictInt | None = None,
                         label: str | None = None,
                         clear: list[str] | None = None) -> dict:
-    """Replace a logged session's date and exercises (same id). ONLY after showing the user the
-    current entry (coach_session_detail) and the correction, and getting their explicit yes.
+    """Correct a logged session (same id). ONLY after showing the user the current entry
+    (coach_session_detail) and the correction, and getting their explicit yes.
 
-    date + exercises replace the stored ones and are validated/canonicalized like a fresh log (exceptions below)
+    Omit date / exercises to keep them (stored exercises stay byte-identical) — e.g. to change only the label.
+    When given, date + exercises replace the stored ones and are validated/canonicalized like a fresh log (exceptions below)
     (malformed input is rejected before any write). Every other field omitted OR null KEEPS its stored
     value (phase, kind, post_feedback, pre_recovery_score, label) — pass one only to change it. To REMOVE a
     stored post_feedback / pre_recovery_score / label, name it in `clear` (e.g. clear=["label"]); a
