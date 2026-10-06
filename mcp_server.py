@@ -141,7 +141,10 @@ def coach_session_detail(session_id: str | None = None, date: str | None = None)
 
     Returns {sessions: [...]}: every exercise with its `index` (the handle coach_session_amend takes),
     its identity and raw_name as typed, sets/reps/rpe,
-    weight_kg plus the user's own numbers (weight_as_entered + unit_as_entered), load_type
+    weight_kg plus the user's own numbers (weight_as_entered + unit_as_entered: the effective read-back,
+    which falls back to kg for rows written before units were recorded; unit_as_entered is null when no
+    weight was entered, e.g. bodyweight sets; entered_weight + entered_unit are the raw stored
+    weight + unit form, null on those older rows), load_type
     (load_type_unknown when not recorded), muscle_group + muscle_source, and needs_review with the reason.
     Every stored entry is listed: a nameless one (older rows) has name null and needs_review.
     Unknown id or date -> invalid_input.

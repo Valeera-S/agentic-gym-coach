@@ -567,8 +567,12 @@ class ExerciseDetail(BaseModel):
     load_type: str | None = None             # per_hand | per_side | total | machine_stack | bodyweight
     load_type_unknown: bool = True           # no load_type stored: tonnage counts it as read
     weight_as_entered: list[float | None] = Field(default_factory=list)  # the user's own numbers
-    unit_as_entered: str = "kg"              # their unit ('kg' for weight_kg callers)
-    entered_weight: list[float | None] | None = None  # stored weight+unit form, if used
+    # unit_as_entered: their unit ('kg' for weight_kg callers; falls back to kg for rows
+    # written before units were recorded); null when no weight was entered at all.
+    # weight_as_entered / unit_as_entered are this EFFECTIVE read-back; entered_weight /
+    # entered_unit below are the RAW stored weight + unit form (null on those older rows).
+    unit_as_entered: str | None = None
+    entered_weight: list[float | None] | None = None  # raw stored weight+unit form, if used
     entered_unit: str | None = None
     tempo: str | None = None
     form_quality: int | None = None

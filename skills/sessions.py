@@ -118,6 +118,7 @@ def _exercise(e: dict | None, index: int | None = None) -> ExerciseDetail:
     unit = e.get("entered_unit")
     sets = e.get("sets")
     weights = _per_set(e.get("weight_kg"), sets)
+    as_entered = list(e["entered_weight"]) if unit else weights
     return ExerciseDetail(
         index=index,
         name=e.get("name"),
@@ -134,8 +135,9 @@ def _exercise(e: dict | None, index: int | None = None) -> ExerciseDetail:
         load_type_unknown=e.get("load_type") is None,
         # what the user entered: the weight+unit form if they used it, else
         # the kg numbers they sent as weight_kg
-        weight_as_entered=list(e["entered_weight"]) if unit else weights,
-        unit_as_entered=unit or "kg",
+        weight_as_entered=as_entered,
+        # no weight entered (bodyweight / unrecorded sets) means no unit either (P61)
+        unit_as_entered=(unit or "kg") if any(w is not None for w in as_entered) else None,
         entered_weight=list(e["entered_weight"]) if e.get("entered_weight") is not None else None,
         entered_unit=unit,
         tempo=e.get("tempo"),
