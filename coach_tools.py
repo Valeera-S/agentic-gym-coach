@@ -174,7 +174,8 @@ def cmd_safety_check(args: dict):
 @_accepts("date")
 def cmd_recovery(args: dict):
     from skills.recovery import compute_recovery_score
-    d = _parse_date(args.get("date")) or date.today()
+    from models.dates import today
+    d = _parse_date(args.get("date")) or today()
     return compute_recovery_score(d).model_dump(mode="json")
 
 
