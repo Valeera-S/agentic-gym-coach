@@ -190,7 +190,7 @@ def test_delete_affects_only_its_own_session():
     keep, drop = _log(), _log()
     DISPATCH["session_delete"]({"session_id": drop})
     assert _row(keep) is not None
-    assert [str(s["id"]) for s in DISPATCH["sessions"]({})] == [keep]
+    assert [str(s["id"]) for s in DISPATCH["sessions"]({})["sessions"]] == [keep]
 
 
 def test_deleting_twice_is_invalid_input_and_audits_once():
@@ -221,8 +221,9 @@ def test_mcp_wrappers_match_the_cli():
     out = mcp_server.coach_session_amend(session_id=sid, date="2026-10-04",
                                          exercises=[{"new": True, "name": "Lat Pulldown", "sets": 3}])
     assert out["action"] == "amended"
-    assert mcp_server.coach_session_amend(session_id=sid, date="2026-10-04",
-                                          exercises=[])["action"] == "amended"
+    # an empty list is no longer a silent delete-everything (P39)
+    empty = mcp_server.coach_session_amend(session_id=sid, date="2026-10-04", exercises=[])
+    assert empty["error"] == "invalid_input" and "coach_session_delete" in empty["detail"]
     assert mcp_server.coach_session_delete(session_id=sid)["action"] == "deleted"
     assert mcp_server.coach_session_delete(session_id=sid)["error"] == "invalid_input"
 
@@ -467,7 +468,10 @@ def test_a_rename_with_confirm_muscle_keeps_a_caller_set_muscle():
         dict(_as_input(d["exercises"][0]), name="Lat Pulldown", confirm_muscle=True)]})
     row = _detail(sid)["exercises"][0]
     assert (row["muscle_group"], row["muscle_source"]) == ("triceps", "caller")
-    assert not [f for f in out["anomaly_flags"] if "muscle_group" in f["detail"]]
+    assert not [f for f in out["anomaly_flags"]
+                if f["code"] == "amend_not_applied" and "muscle_group" in f["detail"]]
+    # triceps is stored as the user's call, but Lat Pulldown's chart row does not credit it
+    assert "muscle_disagrees_with_catalog" in [f["code"] for f in out["anomaly_flags"]]
 
 
 def test_a_dropped_copied_muscle_is_reported():
@@ -636,7 +640,7 @@ def test_detail_shows_every_stored_exercise_including_nameless_ones_with_their_i
 
 def test_listing_counts_nameless_entries_like_the_detail_does():
     sid = _session_with_nameless()
-    assert [s for s in DISPATCH["sessions"]({}) if str(s["id"]) == sid][0]["needs_review"] == 2
+    assert [s for s in DISPATCH["sessions"]({})["sessions"] if str(s["id"]) == sid][0]["needs_review"] == 2
 
 
 def test_amend_lists_every_stored_exercise_it_removed_nameless_ones_included():

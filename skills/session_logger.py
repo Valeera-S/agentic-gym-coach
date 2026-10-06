@@ -33,7 +33,7 @@ from models import (
     classify,
 )
 
-from models.exercise_catalog import default_load_type, resolve_name
+from models.exercise_catalog import credited_muscles, default_load_type, resolve_name
 
 from .init import get_duckdb
 from .phase import phase_for_logging
@@ -74,6 +74,16 @@ def _anomaly_flags(data: SessionInput, sources: list[MuscleSource | None],
         if not known:
             flags.append(AnomalyFlag(code=AnomalyCode.needs_review,
                                      detail=review_detail(ex.name, ex.muscle_group, source)))
+        elif source is MuscleSource.caller and ex.muscle_group is not None:
+            # caller wins (stored as given), but a muscle the chart row of a KNOWN
+            # identity does not credit is worth a word to the user
+            credited = credited_muscles(ex.name, None)
+            if credited and ex.muscle_group.value not in credited:
+                flags.append(AnomalyFlag(
+                    code=AnomalyCode.muscle_disagrees_with_catalog,
+                    detail=(f"{ex.name}: muscle_group {ex.muscle_group.value} was set by the "
+                            f"caller and stored as given, but the catalog credits "
+                            f"{', '.join(sorted(credited))} for this exercise; confirm it with the user")))
         if ex.pain_flag:
             flags.append(AnomalyFlag(
                 code=AnomalyCode.pain_flag, detail=f"{ex.name}: pain during exercise"))

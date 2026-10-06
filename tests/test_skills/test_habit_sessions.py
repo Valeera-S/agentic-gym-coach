@@ -37,7 +37,7 @@ def _training(d: date) -> None:
 def test_default_kind_is_training():
     _training(D)
     assert get_duckdb().execute("SELECT kind FROM sessions").fetchone()[0] == "training"
-    assert SessionInput(date=D, exercises=[]).kind is SessionKind.training
+    assert SessionInput(date=D, exercises=[ExerciseModel(name="Squat", sets=1)]).kind is SessionKind.training
 
 
 def test_habit_sets_count_toward_volume():
@@ -131,7 +131,7 @@ def test_kind_through_both_surfaces_and_listed_by_sessions():
     assert mcp_server.coach_log_session(date="2026-10-03",
                                         exercises=[{"name": "Lat Pulldown", "sets": 3}])
     listed = DISPATCH["sessions"]({})
-    assert [s["kind"] for s in listed] == ["habit", "training"]
+    assert [s["kind"] for s in listed["sessions"]] == ["habit", "training"]
 
 
 def _pulldown(d: date, kg: float) -> None:

@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from models import ExerciseModel, LogConfirmation, MuscleGroup, SessionInput
 from skills.init import get_duckdb
+from conftest import log_empty_session
 from skills.session_logger import log_session
 
 
@@ -71,9 +72,10 @@ def test_phase_from_input_is_respected():
     assert phase == "deload"
 
 
-def test_empty_exercises_logs_rest_day():
-    inp = SessionInput(date=date(2025, 1, 2), exercises=[])
-    conf = log_session(inp)
+def test_empty_exercises_row_already_stored_still_writes_and_reads():
+    # logging a session with no exercises is rejected on input (P39); the
+    # writer and readers still tolerate such rows (legacy data)
+    conf = log_empty_session(date(2025, 1, 2))
     assert conf.anomaly_flags == []
     assert get_duckdb().execute("SELECT count(*) FROM sessions").fetchone()[0] == 1
 

@@ -6,6 +6,8 @@ from models import ExerciseModel, SessionInput
 from skills.init import get_duckdb
 from skills.session_logger import log_session
 
+from conftest import log_empty_session
+
 T = date(2030, 1, 10)
 
 
@@ -15,7 +17,7 @@ def _stored_phase() -> str | None:
 
 
 def test_empty_exercises_array_logs_cleanly():
-    conf = log_session(SessionInput(date=T, exercises=[]))
+    conf = log_empty_session(T)
     assert conf.anomaly_flags == []
     assert _stored_phase() == "maintenance"  # default phase on empty DB
     n = get_duckdb().execute("SELECT count(*) FROM sessions").fetchone()[0]
@@ -78,7 +80,7 @@ def test_alias_maps_to_canonical_name_and_group():
 def test_pre_recovery_score_bounds():
     for bad in (-1, 101):
         try:
-            log_session(SessionInput(date=T, pre_recovery_score=bad, exercises=[]))
+            log_empty_session(T, pre_recovery_score=bad)
             raised = False
         except Exception:
             raised = True
@@ -86,13 +88,13 @@ def test_pre_recovery_score_bounds():
 
 
 def test_explicit_phase_beats_fallback_chain():
-    log_session(SessionInput(date=T, phase="cut", exercises=[]))
+    log_empty_session(T, phase="cut")
     assert _stored_phase() == "cut"
 
 
 def test_two_same_day_sessions_are_two_rows():
-    log_session(SessionInput(date=T, exercises=[]))
-    log_session(SessionInput(date=T, exercises=[]))
+    log_empty_session(T)
+    log_empty_session(T)
     n = get_duckdb().execute(
         "SELECT count(*) FROM sessions WHERE date = ?", [T]).fetchone()[0]
     assert n == 2

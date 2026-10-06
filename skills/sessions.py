@@ -93,6 +93,15 @@ def _needs_review(name: str | None, source: str | None) -> bool:
     return True  # a source this version does not know: never assume it is confirmed
 
 
+def _per_set(values: list | None, sets: int | None) -> list:
+    """A stored per-set array as a list. NULL / empty means "unrecorded for
+    every set" and reads as [None] * sets, exactly as trend and the snapshot
+    pad it (P32); a non-empty array is returned as stored."""
+    if values:
+        return list(values)
+    return [None] * sets if sets and sets > 0 else []
+
+
 def _exercise(e: dict | None, index: int | None = None) -> ExerciseDetail:
     """One stored exercise as ExerciseDetail. A nameless entry (some older rows
     hold them, and NULL entries) is shown too — with its index, as needing
@@ -106,6 +115,8 @@ def _exercise(e: dict | None, index: int | None = None) -> ExerciseDetail:
     else:
         detail = _review_text(e["name"], e.get("muscle_group"), source) if flag else None
     unit = e.get("entered_unit")
+    sets = e.get("sets")
+    weights = _per_set(e.get("weight_kg"), sets)
     return ExerciseDetail(
         index=index,
         name=e.get("name"),
@@ -114,15 +125,15 @@ def _exercise(e: dict | None, index: int | None = None) -> ExerciseDetail:
         muscle_source=source,
         needs_review=flag,
         review_detail=detail,
-        sets=e.get("sets"),
-        reps=[_f32(r) for r in (e.get("reps") or [])],
-        rpe=[_f32(r) for r in (e.get("rpe") or [])],
-        weight_kg=list(e.get("weight_kg") or []),
+        sets=sets,
+        reps=[_f32(r) for r in _per_set(e.get("reps"), sets)],
+        rpe=[_f32(r) for r in _per_set(e.get("rpe"), sets)],
+        weight_kg=weights,
         load_type=e.get("load_type"),
         load_type_unknown=e.get("load_type") is None,
         # what the user entered: the weight+unit form if they used it, else
         # the kg numbers they sent as weight_kg
-        weight_as_entered=list(e["entered_weight"]) if unit else list(e.get("weight_kg") or []),
+        weight_as_entered=list(e["entered_weight"]) if unit else weights,
         unit_as_entered=unit or "kg",
         entered_weight=list(e["entered_weight"]) if e.get("entered_weight") is not None else None,
         entered_unit=unit,

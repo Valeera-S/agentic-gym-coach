@@ -55,7 +55,7 @@ def test_sets_above_50_rejected():
 
 
 def test_null_rpe_entries_allowed():
-    m = ExerciseModel(**_ex(reps=[5, 5], rpe=[None, 8], weight_kg=[60.0, 60.0]))
+    m = ExerciseModel(**_ex(sets=2, reps=[5, 5], rpe=[None, 8], weight_kg=[60.0, 60.0]))
     assert m.rpe == [None, 8.0]
 
 
@@ -112,3 +112,218 @@ def test_availability_window_allows_open_ended_slots():
     # "Fri after 7" with no known close: start-only is the intended encoding.
     w = AvailabilityWindow(weekday=Weekday.fri, start="19:00")
     assert w.start == "19:00" and w.end is None
+
+
+# --- per-set arrays must match `sets` (P36) ----------------------------------------
+
+@pytest.mark.parametrize("field, value", [
+    ("reps", [5] * 5), ("rpe", [8] * 5), ("weight_kg", [100.0] * 5),
+    ("reps", [5]), ("weight_kg", [100.0, 100.0, 100.0]),
+])
+def test_non_empty_per_set_array_must_have_exactly_sets_entries(field, value):
+    with pytest.raises(Exception, match="sets"):
+        ExerciseModel(name="Leg Press", sets=2, **{field: value})
+
+
+def test_entered_weight_array_must_match_sets():
+    with pytest.raises(Exception, match="sets"):
+        ExerciseModel(name="Leg Press", sets=2, weight=[100, 100, 100, 100, 100], unit="kg")
+
+
+def test_leg_press_sets_2_with_five_entries_is_rejected_at_the_tool():
+    from coach_tools import DISPATCH, error_payload
+    with pytest.raises(ValueError) as exc:
+        DISPATCH["log_session"]({"date": "2026-10-01", "exercises": [
+            {"name": "Leg Press", "sets": 2, "reps": [5] * 5, "weight_kg": [100] * 5}]})
+    assert error_payload(exc.value)["error"] == "invalid_input"
+
+
+def test_matching_and_empty_arrays_still_accepted_and_padded():
+    m = ExerciseModel(name="Leg Press", sets=3, reps=[5, 5, 5])
+    assert m.rpe == [None] * 3 and m.weight_kg == [None] * 3
+    assert ExerciseModel(name="Leg Press", sets=3).reps == []
+
+
+# --- a recorded rep count is >= 1, a recorded rpe is within 1..10 (P37) ------------
+
+@pytest.mark.parametrize("field, bad", [
+    ("reps", 0), ("reps", 0.1), ("reps", 0.99), ("reps", -1),
+    ("rpe", 0), ("rpe", 0.5), ("rpe", 0.99), ("rpe", 10.5),
+])
+def test_unrealistic_recorded_reps_or_rpe_rejected(field, bad):
+    with pytest.raises(Exception, match=field):
+        ExerciseModel(name="Squat", sets=1, weight_kg=[200.0], **{field: [bad]})
+
+
+def test_boundary_reps_and_rpe_accepted_and_null_still_means_unrecorded():
+    m = ExerciseModel(name="Squat", sets=3, reps=[1, None, 100], rpe=[1, None, 10])
+    assert m.reps == [1, None, 100] and m.rpe == [1, None, 10]
+
+
+def test_zero_rep_set_is_rejected_at_the_tool_so_it_cannot_count_as_a_hard_set():
+    from coach_tools import DISPATCH
+    with pytest.raises(ValueError, match="reps"):
+        DISPATCH["log_session"]({"date": "2026-10-01", "exercises": [
+            {"name": "Squat", "sets": 1, "reps": [0], "weight_kg": [200]}]})
+
+
+# --- numeric input fields are JSON numbers, not booleans or strings (P41) ----------
+
+@pytest.mark.parametrize("kw", [
+    dict(sets=True), dict(sets="3"), dict(sets=3.0),
+    dict(sets=1, reps=[True]), dict(sets=1, reps=["5"]),
+    dict(sets=1, rpe=[True]), dict(sets=1, rpe=["8"]),
+    dict(sets=1, weight_kg=[True]), dict(sets=1, weight_kg=["80"]),
+    dict(sets=1, weight=["80"], unit="kg"), dict(sets=1, weight=[True], unit="kg"),
+    dict(sets=1, form_quality=True), dict(sets=1, form_quality="4"),
+])
+def test_exercise_numbers_reject_booleans_and_numeric_strings(kw):
+    with pytest.raises(Exception):
+        ExerciseModel(name="Squat", **kw)
+
+
+@pytest.mark.parametrize("bad", [True, "80", 80.5])
+def test_pre_recovery_score_must_be_an_integer_number(bad):
+    with pytest.raises(Exception):
+        SessionInput(date=date(2026, 10, 1), pre_recovery_score=bad,
+                     exercises=[ExerciseModel(name="Squat", sets=1)])
+
+
+def test_integers_are_still_fine_for_float_fields():
+    m = ExerciseModel(name="Squat", sets=1, reps=[5], rpe=[8], weight_kg=[100])
+    assert m.weight_kg == [100.0]
+
+
+@pytest.mark.parametrize("kw", [dict(weight_kg=[0]), dict(weight_kg=[0.0]),
+                                dict(weight=[0], unit="lb"), dict(weight=[0], unit="kg")])
+def test_a_zero_weight_is_rejected_and_points_to_null_for_bodyweight(kw):
+    with pytest.raises(Exception, match="null") as exc:
+        ExerciseModel(name="Pull-Up", sets=1, **kw)
+    assert "bodyweight" in str(exc.value)
+
+
+def test_null_weight_still_means_bodyweight_or_unrecorded():
+    assert ExerciseModel(name="Pull-Up", sets=2, weight_kg=[None, None]).weight_kg == [None, None]
+
+
+# --- dates must be plausible (P38) -----------------------------------------------------
+
+@pytest.fixture
+def clock(monkeypatch):
+    """Pin "today" for the plausibility window (no wall-clock dependence)."""
+    import models.dates
+    monkeypatch.setattr(models.dates, "today", lambda: date(2026, 10, 6))
+
+
+def _session_on(d):
+    return SessionInput(date=d, exercises=[ExerciseModel(name="Squat", sets=1)])
+
+
+@pytest.mark.parametrize("bad", [date(2099, 1, 1), date(1, 1, 1), date(1999, 12, 31),
+                                 date(2026, 10, 8), date(9999, 12, 31)])
+def test_implausible_session_dates_rejected(clock, bad):
+    with pytest.raises(Exception, match="plausible"):
+        _session_on(bad)
+
+
+@pytest.mark.parametrize("ok", [date(2000, 1, 1), date(2026, 10, 6), date(2026, 10, 7)])
+def test_plausible_session_dates_accepted_incl_one_day_slack(clock, ok):
+    assert _session_on(ok).date == ok
+
+
+def test_far_future_session_is_rejected_at_the_tool_and_never_stored(clock):
+    from coach_tools import DISPATCH, error_payload
+    with pytest.raises(ValueError) as exc:
+        DISPATCH["log_session"]({"date": "2099-01-01",
+                                 "exercises": [{"name": "Squat", "sets": 1}]})
+    assert error_payload(exc.value)["error"] == "invalid_input"
+    assert DISPATCH["sessions"]({})["count"] == 0
+
+
+def test_amend_date_is_checked_too(clock):
+    from models import SessionAmendInput
+    with pytest.raises(Exception, match="plausible"):
+        SessionAmendInput(session_id="00000000-0000-0000-0000-000000000001",
+                          date=date(2099, 1, 1),
+                          exercises=[dict(name="Squat", sets=1, new=True)])
+
+
+# --- names, text and payload shape (P39) / unencodable text (P40) ------------------------
+
+@pytest.mark.parametrize("name", ["", "   ", "\t\n ", "x" * 201])
+def test_blank_or_overlong_exercise_names_rejected(name):
+    with pytest.raises(Exception, match="name"):
+        ExerciseModel(name=name, sets=1)
+
+
+def test_a_200_character_name_is_accepted():
+    assert len(ExerciseModel(name="x" * 200, sets=1).name) == 200
+
+
+@pytest.mark.parametrize("field", ["name", "notes", "tempo"])
+@pytest.mark.parametrize("bad", ["a\x00b", "bell\x07", "esc\x1b[0m", "del\x7f"])
+def test_control_characters_rejected_in_exercise_text(field, bad):
+    kw = {"name": "Squat", "sets": 1, field: bad}
+    with pytest.raises(Exception, match="control"):
+        ExerciseModel(**kw)
+
+
+def test_newline_and_tab_are_allowed_in_notes():
+    assert ExerciseModel(name="Squat", sets=1, notes="felt good\n\tdeep").notes == "felt good\n\tdeep"
+
+
+def test_post_feedback_control_characters_rejected():
+    with pytest.raises(Exception, match="control"):
+        SessionInput(date=D, post_feedback="ok\x00", exercises=[ExerciseModel(name="Squat", sets=1)])
+
+
+@pytest.mark.parametrize("field", ["name", "notes", "post_feedback"])
+def test_lone_surrogates_are_invalid_input_not_internal(field):
+    """P40: a lone surrogate reached DuckDB and surfaced as an `internal` RuntimeError."""
+    from coach_tools import DISPATCH, error_payload
+    ex = {"name": "Squat", "sets": 1}
+    top = {}
+    if field == "post_feedback":
+        top[field] = "bad \ud800 text"
+    else:
+        ex[field] = "bad \ud800 text"
+    with pytest.raises(ValueError, match="UTF-8") as exc:
+        DISPATCH["log_session"]({"date": "2026-10-01", "exercises": [ex], **top})
+    assert error_payload(exc.value)["error"] == "invalid_input"
+    assert DISPATCH["sessions"]({})["count"] == 0
+
+
+def test_log_requires_at_least_one_exercise():
+    with pytest.raises(Exception, match="at least one exercise"):
+        SessionInput(date=D, exercises=[])
+
+
+def test_amend_with_empty_exercises_points_to_session_delete():
+    from models import SessionAmendInput
+    with pytest.raises(Exception, match="coach_session_delete"):
+        SessionAmendInput(session_id="00000000-0000-0000-0000-000000000001", date=D, exercises=[])
+
+
+def test_amend_with_empty_exercises_changes_nothing_at_the_tool():
+    from coach_tools import DISPATCH
+    sid = DISPATCH["log_session"]({"date": "2026-10-01", "exercises": [
+        {"name": "Squat", "sets": 1}]})["session_id"]
+    with pytest.raises(ValueError, match="coach_session_delete"):
+        DISPATCH["session_amend"]({"session_id": sid, "date": "2026-10-01", "exercises": []})
+    (s,) = DISPATCH["session_detail"]({"session_id": sid})["sessions"]
+    assert len(s["exercises"]) == 1
+
+
+def test_a_2mb_name_is_rejected_with_a_short_detail():
+    from coach_tools import DISPATCH, error_payload
+    with pytest.raises(ValueError) as exc:
+        DISPATCH["log_session"]({"date": "2026-10-01", "exercises": [
+            {"name": "x" * 2_000_000, "sets": 1}]})
+    assert len(error_payload(exc.value)["detail"]) < 2000
+
+
+def test_bodyweight_text_fields_are_checked_too():
+    from models.bodyweight import BodyweightInput
+    for field, bad in (("notes", "a\x00"), ("scale", "x\ud800")):
+        with pytest.raises(Exception):
+            BodyweightInput(date=date(2026, 10, 1), condition="fed", weight_kg=80, **{field: bad})

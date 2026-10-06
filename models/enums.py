@@ -142,12 +142,15 @@ class TrendDirection(str, Enum):
 
 class AnomalyCode(str, Enum):
     """Exactly the codes session_logger emits when writing a session (and,
-    for `amend_not_applied`, the amend tool)."""
+    for `amend_not_applied`, the amend tool; `muscle_disagrees_with_catalog` on a caller muscle the
+    catalog does not credit for a known identity)."""
 
     pain_flag = "pain_flag"
     form_quality_low = "form_quality_low"
     needs_review = "needs_review"
     amend_not_applied = "amend_not_applied"  # a value copied from a replaced exercise
+    # a caller-set muscle on a catalog identity that its chart row does not credit
+    muscle_disagrees_with_catalog = "muscle_disagrees_with_catalog"
 
 
 class DecisionEventType(str, Enum):

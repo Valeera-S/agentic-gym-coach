@@ -11,6 +11,9 @@ and the CLI exits 1. Codes:
     db            — storage failure: halt and report; don't retry blindly
     internal      — unexpected bug: halt and report
 
+List-returning tools return an object ({"sessions": [...], "count": n}, ...): a bare empty
+list reaches an MCP client as empty content, indistinguishable from a failed call.
+
 bash 0.5s budget per call. Skills are pure deterministic code.
 """
 from __future__ import annotations
@@ -111,7 +114,8 @@ def cmd_intake_status(args: dict):
 def cmd_sessions(args: dict):
     from skills.sessions import list_sessions
     limit = _int_arg(args, "limit", DEFAULT_SESSIONS_LIMIT, minimum=0)
-    return list_sessions(limit)
+    rows = list_sessions(limit)
+    return {"sessions": rows, "count": len(rows)}
 
 
 def cmd_session_detail(args: dict):
@@ -152,7 +156,8 @@ def cmd_bodyweight_history(args: dict):
 
 def cmd_injuries_list(args: dict):
     from skills.injuries import list_injuries
-    return [i.model_dump(mode="json") for i in list_injuries()]
+    injuries = [i.model_dump(mode="json") for i in list_injuries()]
+    return {"injuries": injuries, "count": len(injuries)}
 
 
 def cmd_injuries_seed(args: dict):
@@ -209,7 +214,7 @@ def cmd_memory_search(args: dict):
         tags=args.get("tags"),
         limit=_int_arg(args, "limit", DEFAULT_SEARCH_LIMIT, minimum=0),
     )
-    return [n.model_dump(mode="json") for n in notes]
+    return {"notes": [n.model_dump(mode="json") for n in notes], "count": len(notes)}
 
 
 def _release_after_call(fn):
@@ -256,8 +261,10 @@ def main() -> None:
     cmd = sys.argv[1]
     fn = DISPATCH.get(cmd)
     if fn is None:
-        print(json.dumps({"error": f"unknown command '{cmd}'", "available": list(DISPATCH)}))
-        sys.exit(2)
+        # same three-code contract as every other failure (+ the list to pick from)
+        print(json.dumps({"error": "invalid_input", "exception": "UnknownCommand",
+                          "detail": f"unknown command '{cmd}'", "available": list(DISPATCH)}))
+        sys.exit(1)
     try:
         # the argument is parsed INSIDE the error contract: malformed JSON, or
         # JSON that is not an object (handlers take a dict), is invalid_input —

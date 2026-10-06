@@ -8,6 +8,8 @@ from skills.snapshot import REPRESENTATIVE_LIFTS, _block_state, _insight
 from skills.profile import set_profile
 from models import Goal, GoalKind, UserProfile
 
+from conftest import log_empty_session
+
 T = date(2030, 1, 10)
 
 
@@ -48,7 +50,7 @@ def test_block_state_none_without_deload_history():
 
 
 def test_block_state_counts_weeks_and_blocks_since_deload():
-    log_session(SessionInput(date=T - timedelta(days=70), phase="deload", exercises=[]))
+    log_empty_session(T - timedelta(days=70), phase="deload")
     bs = _block_state(T)
     assert bs["weeks_since_deload"] == 10.0
     assert bs["blocks_since_deload"] == 2  # 70 days // 4-week blocks
@@ -80,7 +82,7 @@ def test_session_gap_none_without_any_sessions():
 
 def test_session_gap_just_under_threshold_not_recommended():
     from skills.snapshot import session_gap
-    log_session(SessionInput(date=T - timedelta(days=55), exercises=[]))  # 7.9w < 8w
+    log_empty_session(T - timedelta(days=55))  # 7.9w < 8w
     gap = session_gap(T)
     assert gap.weeks_since_last_session == 7.9
     assert gap.reassessment_recommended is False
@@ -88,7 +90,7 @@ def test_session_gap_just_under_threshold_not_recommended():
 
 def test_session_gap_at_threshold_is_recommended():
     from skills.snapshot import session_gap
-    log_session(SessionInput(date=T - timedelta(days=56), exercises=[]))  # exactly 8.0w
+    log_empty_session(T - timedelta(days=56))  # exactly 8.0w
     gap = session_gap(T)
     assert gap.weeks_since_last_session == 8.0
     assert gap.reassessment_recommended is True  # >= semantics
@@ -96,7 +98,7 @@ def test_session_gap_at_threshold_is_recommended():
 
 def test_session_gap_just_over_threshold_recommended():
     from skills.snapshot import session_gap
-    log_session(SessionInput(date=T - timedelta(days=57), exercises=[]))  # 8.1w
+    log_empty_session(T - timedelta(days=57))  # 8.1w
     gap = session_gap(T)
     assert gap.weeks_since_last_session == 8.1
     assert gap.reassessment_recommended is True
@@ -105,7 +107,7 @@ def test_session_gap_just_over_threshold_recommended():
 def test_gap_threshold_is_the_single_configurable_constant(monkeypatch):
     import skills.snapshot as snap_mod
     from skills.snapshot import session_gap
-    log_session(SessionInput(date=T - timedelta(days=55), exercises=[]))  # 7.9w
+    log_empty_session(T - timedelta(days=55))  # 7.9w
     assert session_gap(T).reassessment_recommended is False
     monkeypatch.setattr(snap_mod, "REASSESSMENT_GAP_WEEKS", 7.0)
     assert session_gap(T).reassessment_recommended is True  # one constant flips it
@@ -115,7 +117,7 @@ def test_snapshot_exposes_session_gap():
     # generate_phase_snapshot uses date.today() internally — seed relative to it.
     from skills.snapshot import generate_phase_snapshot
     today = date.today()
-    log_session(SessionInput(date=today - timedelta(days=57), exercises=[]))
+    log_empty_session(today - timedelta(days=57))
     snap = generate_phase_snapshot()
     assert snap.session_gap.weeks_since_last_session == 8.1
     assert snap.session_gap.reassessment_recommended is True

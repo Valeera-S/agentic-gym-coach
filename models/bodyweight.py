@@ -7,10 +7,12 @@ from datetime import date as Date, datetime
 from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .dates import check_plausible_date
+from .text import clean_text
 from .enums import WeightUnit
-from .session import LB_TO_KG
+from .session import LB_TO_KG, StrictNum
 
 MAX_BODYWEIGHT_KG = 400.0
 
@@ -32,11 +34,21 @@ class BodyweightInput(BaseModel):
 
     date: Date
     condition: WeighCondition
-    weight: float | None = None
+    weight: StrictNum | None = None  # a JSON number: never `true`, never "80" (P41)
     unit: WeightUnit | None = None
-    weight_kg: float | None = None
+    weight_kg: StrictNum | None = None
     scale: str | None = None
     notes: str | None = None
+
+    @field_validator("scale", "notes")
+    @classmethod
+    def _clean_text_fields(cls, v: str | None, info) -> str | None:
+        return clean_text(v, info.field_name)
+
+    @field_validator("date")
+    @classmethod
+    def _plausible_date(cls, v: Date) -> Date:
+        return check_plausible_date(v)
 
     @model_validator(mode="after")
     def _to_kg(self) -> "BodyweightInput":
