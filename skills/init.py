@@ -125,6 +125,58 @@ def connection_scope() -> Iterator[None]:
                 _close_duckdb()
 
 
+# --- schema revision guard (P75) ---------------------------------------------
+# The Alembic revision this code needs. tests/test_schema_guard.py asserts it
+# equals Alembic's head, so a new migration cannot land without bumping it.
+REQUIRED_SCHEMA_REVISION = "0005_bodyweight_log"
+
+# DB paths whose revision check has PASSED in this process. A failing check is
+# never cached, so `alembic upgrade head` run while the server is up fixes the
+# next call without a restart.
+_schema_ok: set[str] = set()
+
+
+class SchemaMismatchError(duckdb.Error):
+    """The database revision differs from REQUIRED_SCHEMA_REVISION (a `db` error)."""
+
+
+def _schema_message(found: str | None) -> str:
+    need = REQUIRED_SCHEMA_REVISION
+    if found is None:
+        return (f"The database {_DUCK_PATH} has no schema yet. Run `alembic upgrade head` "
+                "from the repository root to create the database, then reconnect the "
+                "coach (`/mcp` in Claude Code). No tool ran.")
+    if found < need:  # revision ids start with a zero-padded number
+        return (f"The database is at schema revision {found} but this code needs {need}: "
+                "the code was updated without upgrading the database. Steps: 1) back up the "
+                "`data/` folder to a location OUTSIDE the repository; 2) run "
+                "`alembic upgrade head` from the repository root; 3) reconnect the coach "
+                "(`/mcp` in Claude Code). No tool ran and nothing was changed.")
+    return (f"The database is at schema revision {found}, newer than the {need} this code "
+            "understands: the code is older than the data. Update the code (pull the latest "
+            "version). Do NOT downgrade the database. No tool ran and nothing was changed.")
+
+
+def ensure_schema_current() -> None:
+    """Raise SchemaMismatchError unless the DB is at REQUIRED_SCHEMA_REVISION.
+
+    Cached per DB path once it passes; re-checked on every call while it fails."""
+    key = str(_DUCK_PATH)
+    if key in _schema_ok:
+        return
+    con = get_duckdb()
+    has_table = con.execute(
+        "SELECT count(*) FROM information_schema.tables WHERE table_name = 'alembic_version'"
+    ).fetchone()[0]
+    found = None
+    if has_table:
+        row = con.execute("SELECT version_num FROM alembic_version").fetchone()
+        found = row[0] if row else None
+    if found != REQUIRED_SCHEMA_REVISION:
+        raise SchemaMismatchError(_schema_message(found))
+    _schema_ok.add(key)
+
+
 def get_lance() -> Any:
     """Return the shared LanceDB connection (creates the dir on first call)."""
     global _lance

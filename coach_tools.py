@@ -360,8 +360,9 @@ def _release_after_call(fn):
     long-lived caller) never locks other processes out of the database."""
     @functools.wraps(fn)
     def run(args: dict):
-        from skills.init import connection_scope
+        from skills.init import connection_scope, ensure_schema_current
         with connection_scope():
+            ensure_schema_current()  # P75: no tool runs against a mismatched schema
             return fn(args)
     return run
 
