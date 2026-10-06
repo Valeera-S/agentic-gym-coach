@@ -39,6 +39,15 @@ class GateDomain(str, Enum):
     both = "both"
 
 
+class GateCondition(str, Enum):
+    """When a missing `blocks_gate` field actually holds its gate open.
+    Declared on the field (data), evaluated by skills.intake."""
+
+    always = "always"
+    unless_male = "unless_male"    # sex-specific question: skipped only when sex is male
+    when_cutting = "when_cutting"  # only when a goal is fat_loss or physique_target ripped
+
+
 class FieldStatus(str, Enum):
     collected = "collected"  # a value exists in storage (caveat: confirm it's still true)
     missing = "missing"      # nothing stored — the coach must ask
@@ -52,6 +61,9 @@ class IntakeField(BaseModel):
     storage: str         # "profile.<attr>" or "injury_status"
     gates: GateDomain
     blocks_gate: bool = True  # False = reported when missing, but never holds a gate open
+    # When a missing blocking field really blocks (see GateCondition). A field
+    # whose condition is not met is reported missing but does not block.
+    gate_condition: GateCondition = GateCondition.always
     # list-typed profile fields only: True = empty list means "never asked"
     # (strict presence — goals, weekly_availability); False = empty is a valid
     # "nothing applies" answer. Declared here so the resolver carries no
@@ -70,6 +82,9 @@ class FieldReport(IntakeField):
 
     status: FieldStatus
     value: Any = None    # JSON-safe stored value; always None when missing
+    # True when this field, being missing, holds its gate open right now
+    # (blocks_gate and its gate_condition met for the stored profile)
+    blocks_now: bool = False
 
 
 class IntakeReport(BaseModel):
@@ -152,7 +167,8 @@ INTAKE_CHECKLIST: list[IntakeField] = [
     IntakeField(
         name="concurrent_sports", source="Training ch02 (interference effect; one activity takes priority)",
         storage="profile.concurrent_sports", gates=GateDomain.training,
-        note="other sports/cardio: ordering mitigations + priority principle apply",
+        note=("other sports/cardio: ordering mitigations + priority principle apply. "
+              "Never asked = None (missing); asked, none = [] (collected)"),
     ),
     IntakeField(
         name="rpe_calibrated", source="Training ch08 (novices track RPE without programming by it until calibrated)",
@@ -192,7 +208,9 @@ INTAKE_CHECKLIST: list[IntakeField] = [
     IntakeField(
         name="bodyfat_pct", source="Nutrition ch05 (refeed gate: ~12% M / ~20% F)",
         storage="profile.bodyfat_pct", gates=GateDomain.nutrition,
-        note="only needed when cutting — ask-when-relevant",
+        gate_condition=GateCondition.when_cutting,
+        note=("only needed when cutting: blocks the nutrition gate only when some goal has "
+              "kind fat_loss or physique_target ripped; otherwise reported when missing, never blocking"),
     ),
     IntakeField(
         name="activity_level", source="Nutrition ch02 (maintenance multipliers 1.3–2.2 by daily-life activity)",
@@ -237,11 +255,15 @@ INTAKE_CHECKLIST: list[IntakeField] = [
     IntakeField(
         name="pcos", source="Nutrition ch03 (insulin-resistance macro-branch gate)",
         storage="profile.pcos", gates=GateDomain.nutrition,
-        note="ask-when-relevant (nutrition plan); phrased sensitively",
+        gate_condition=GateCondition.unless_male,
+        note=("ask-when-relevant (nutrition plan); phrased sensitively. Does not apply when sex is "
+              "male: blocks only when sex is female or still unknown"),
     ),
     IntakeField(
         name="oligomenorrhea", source="Nutrition ch03 (>35-day cycles; over-represented in strength sports)",
         storage="profile.oligomenorrhea", gates=GateDomain.nutrition,
-        note="ask-when-relevant (nutrition plan); phrased sensitively",
+        gate_condition=GateCondition.unless_male,
+        note=("ask-when-relevant (nutrition plan); phrased sensitively. Does not apply when sex is "
+              "male: blocks only when sex is female or still unknown"),
     ),
 ]

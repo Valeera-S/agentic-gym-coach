@@ -28,6 +28,7 @@ from models import (
     INTAKE_CHECKLIST,
     FieldReport,
     FieldStatus,
+    GateCondition,
     GateDomain,
     IntakeField,
     IntakeReport,
@@ -69,10 +70,11 @@ def _stored_value(field: IntakeField, profile: UserProfile | None,
     """Resolve one checklist field → (raw value, present?).
 
     Presence semantics are declared on the field (empty_means_missing), not
-    dispatched by name: list-typed profile fields are present whenever a
-    profile exists (empty = valid "nothing applies" answer) unless the field
-    sets empty_means_missing — goals and weekly_availability — where empty is
-    indistinguishable from never-asked.
+    dispatched by name: a list-typed profile field holding a list is present
+    whenever a profile exists (empty = valid "nothing applies" answer) unless
+    the field sets empty_means_missing — goals and weekly_availability — where
+    empty is indistinguishable from never-asked. A list field that is None was
+    never asked (concurrent_sports, P52) and is missing.
     """
     if field.storage == "injury_status":
         return injuries, _is_present(injuries)
@@ -82,6 +84,20 @@ def _stored_value(field: IntakeField, profile: UserProfile | None,
     if isinstance(value, (list, tuple)) and not field.empty_means_missing:
         return value, profile is not None
     return value, _is_present(value)
+
+
+def _blocks(field: IntakeField, profile: UserProfile | None) -> bool:
+    """Does this field, if missing, hold its gate open for THIS profile?"""
+    if not field.blocks_gate:
+        return False
+    cond = field.gate_condition
+    if cond is GateCondition.unless_male:
+        return profile is None or profile.sex is None or profile.sex.value != "male"
+    if cond is GateCondition.when_cutting:
+        return profile is not None and any(
+            g.kind.value == "fat_loss" or (g.physique_target and g.physique_target.value == "ripped")
+            for g in profile.goals)
+    return True
 
 
 def assess_intake(today: date | None = None) -> IntakeReport:
@@ -98,11 +114,12 @@ def assess_intake(today: date | None = None) -> IntakeReport:
             **f.model_dump(),
             status=FieldStatus.collected if present else FieldStatus.missing,
             value=_json_safe(value) if present else None,
+            blocks_now=(not present) and _blocks(f, profile),
         ))
 
     missing_by_gate: dict[str, list[str]] = {"training": [], "nutrition": []}
     for r in reports:
-        if r.status is not FieldStatus.missing or not r.blocks_gate:
+        if not r.blocks_now:
             continue
         if r.gates in (GateDomain.training, GateDomain.both):
             missing_by_gate["training"].append(r.name)

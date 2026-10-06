@@ -95,9 +95,16 @@ scan finds:
      confirms.
    - Exercise likes/dislikes emerge through training: propose exercises,
      update the profile as reactions come in — they never hold a gate open.
-   - bodyfat% only if known and cutting; the insulin-resistance gates
+   - bodyfat% only if known and cutting: it blocks `nutrition_ready` only
+     when a goal is `fat_loss` or `physique_target: ripped` (otherwise it is
+     reported missing but never blocks); the insulin-resistance gates
      (family diabetes history, PCOS, oligomenorrhea — nutrition ch03) only
      when a nutrition prescription is actually due, and phrased sensitively.
+     PCOS and oligomenorrhea do not apply, and do not block, when sex is male
+     (they still block for female or unknown sex); family diabetes history
+     always blocks. Each field's `blocks_now` says whether it holds a gate open.
+   - `concurrent_sports` has to be asked: never asked is `missing`; an answer
+     of "none" is stored as an empty list and counts as collected.
 3. **Plan around the windows.** Build the training week from
    `weekly_availability`. If a session is missed but an unexpected window
    opens, apply the ch02 missed-session protocol (shift, don't cram) and

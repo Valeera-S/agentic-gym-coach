@@ -4,15 +4,19 @@ import json
 import re
 from datetime import date, timedelta
 
+import pytest
+
 from models import (
     INTAKE_CHECKLIST,
     ActivityLevel,
     AvailabilityWindow,
     ExerciseModel,
     FieldStatus,
+    GateCondition,
     Goal,
     GoalKind,
     MuscleGroup,
+    PhysiqueTarget,
     SessionInput,
     Sex,
     StressLevel,
@@ -23,8 +27,9 @@ from models import (
 )
 from conftest import log_empty_session
 from skills.injuries import seed_injury
+from skills.init import get_duckdb
 from skills.intake import assess_intake
-from skills.profile import set_profile
+from skills.profile import get_profile, set_profile
 from skills.session_logger import log_session
 
 TODAY = date.today()
@@ -220,3 +225,107 @@ def test_omitted_fields_are_gone_from_schema_and_checklist():
     assert {"meals_per_day", "social_support", "priority_muscles"}.isdisjoint(names)
     assert "meals_per_day" not in UserProfile.model_fields
     assert "social_support" not in UserProfile.model_fields
+
+
+# --- P52: never-asked vs asked-none, and conditional blocking ---------------------------
+
+def _field(report, name):
+    return next(f for f in report.fields if f.name == name)
+
+
+def test_never_mentioned_concurrent_sports_is_missing_and_blocks_training():
+    base = _training_only_profile().model_copy(update={"concurrent_sports": None})
+    set_profile(base)
+    report = assess_intake(today=TODAY)
+    f = _field(report, "concurrent_sports")
+    assert f.status is FieldStatus.missing and f.value is None
+    assert report.training_ready is False
+    assert report.missing_by_gate["training"] == ["concurrent_sports"]
+
+
+def test_a_profile_that_omits_concurrent_sports_defaults_to_never_asked():
+    assert UserProfile().concurrent_sports is None
+    assert UserProfile.model_validate({"days_per_week": 3}).concurrent_sports is None
+
+
+def test_explicit_empty_concurrent_sports_is_collected_none():
+    set_profile(_training_only_profile())  # concurrent_sports=[] explicitly
+    report = assess_intake(today=TODAY)
+    f = _field(report, "concurrent_sports")
+    assert f.status is FieldStatus.collected and f.value == []
+    assert report.training_ready is True
+
+
+def test_stored_payloads_keep_their_meaning():
+    """No migration: profiles are JSON payloads. A stored [] (explicit, or written
+    before this fix) stays collected; a payload without the key reads as never asked."""
+    con = get_duckdb()
+    for payload in ('{"days_per_week": 3, "concurrent_sports": []}', '{"days_per_week": 3}'):
+        con.execute("DELETE FROM user_profiles")
+        con.execute("INSERT INTO user_profiles (updated_at, payload) VALUES (now(), ?)", [payload])
+        status = _field(assess_intake(today=TODAY), "concurrent_sports").status
+        expected = FieldStatus.collected if "concurrent_sports" in payload else FieldStatus.missing
+        assert status is expected, payload
+
+
+def test_concurrent_sports_round_trips_through_storage():
+    set_profile(UserProfile(concurrent_sports=[]))
+    assert get_profile().concurrent_sports == []
+    set_profile(UserProfile(concurrent_sports=["climbing"]))
+    assert get_profile().concurrent_sports == ["climbing"]
+    set_profile(UserProfile(display_name="x"))
+    assert get_profile().concurrent_sports is None
+
+
+def _male_complete(**update) -> UserProfile:
+    """Complete male profile: everything except pcos / oligomenorrhea / bodyfat_pct."""
+    return _full_profile().model_copy(update={
+        "sex": Sex.male, "pcos": None, "oligomenorrhea": None, "bodyfat_pct": None, **update})
+
+
+def test_a_complete_male_profile_can_be_nutrition_ready():
+    set_profile(_male_complete())
+    seed_injury("left_elbow", "resolving", 3)
+    report = assess_intake(today=TODAY)
+    assert report.nutrition_ready is True and report.training_ready is True
+    assert report.missing_by_gate["nutrition"] == []
+    # still reported as missing, they just do not block
+    assert {"pcos", "oligomenorrhea", "bodyfat_pct"} <= set(report.missing)
+    assert all(_field(report, n).blocks_now is False for n in ("pcos", "oligomenorrhea", "bodyfat_pct"))
+
+
+@pytest.mark.parametrize("sex", [Sex.female, None])
+def test_pcos_and_oligomenorrhea_still_block_for_female_or_unknown_sex(sex):
+    set_profile(_male_complete(sex=sex, bodyfat_pct=25.0))
+    report = assess_intake(today=TODAY)
+    assert report.nutrition_ready is False
+    assert {"pcos", "oligomenorrhea"} <= set(report.missing_by_gate["nutrition"])
+
+
+@pytest.mark.parametrize("goals, blocks", [
+    ([Goal(kind=GoalKind.fat_loss)], True),
+    ([Goal(kind=GoalKind.hypertrophy, physique_target=PhysiqueTarget.ripped)], True),
+    ([Goal(kind=GoalKind.hypertrophy), Goal(kind=GoalKind.fat_loss)], True),
+    ([Goal(kind=GoalKind.hypertrophy, physique_target=PhysiqueTarget.athletic)], False),
+    ([Goal(kind=GoalKind.strength)], False),
+])
+def test_bodyfat_blocks_only_when_cutting(goals, blocks):
+    set_profile(_male_complete(goals=goals))
+    report = assess_intake(today=TODAY)
+    assert ("bodyfat_pct" in report.missing_by_gate["nutrition"]) is blocks
+    assert report.nutrition_ready is (not blocks)
+    assert "bodyfat_pct" in report.missing
+
+
+def test_family_diabetes_history_still_blocks_a_male_profile():
+    set_profile(_male_complete(family_diabetes_history=None))
+    report = assess_intake(today=TODAY)
+    assert report.nutrition_ready is False
+    assert "family_diabetes_history" in report.missing_by_gate["nutrition"]
+
+
+def test_gate_conditions_are_declared_in_the_checklist_notes():
+    by_name = {f.name: f for f in INTAKE_CHECKLIST}
+    for name, word in (("pcos", "male"), ("oligomenorrhea", "male"), ("bodyfat_pct", "fat_loss")):
+        assert by_name[name].gate_condition is not GateCondition.always, name
+        assert word in by_name[name].note, name

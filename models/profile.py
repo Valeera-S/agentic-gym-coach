@@ -173,10 +173,14 @@ class UserProfile(BaseModel):
     # Training-side lifestyle & history — standardized-intake x-factors.
     # life_stress: Training ch02 (one cumulative stress bucket with training).
     # concurrent_sports: Training ch02 (interference effect; priority principle).
+    #   None = never asked; [] = asked, none (an answer) -- the intake gate
+    #   tells them apart (P52). Profiles are stored as JSON payloads, so a
+    #   stored [] stays "asked, none" and a payload without the key reads as
+    #   never asked: no migration.
     # rpe_calibrated: Training ch08 (novices don't program by RPE until calibrated).
     # has_tested_maxes: Training ch08/ch09 ("no tested 1RM → RPE alone").
     life_stress: StressLevel | None = None
-    concurrent_sports: list[str] = Field(default_factory=list)
+    concurrent_sports: list[str] | None = None
     rpe_calibrated: bool | None = None
     has_tested_maxes: bool | None = None
     # Nutrition-side lifestyle & history — standardized-intake x-factors.

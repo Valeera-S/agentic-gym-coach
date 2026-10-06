@@ -20,7 +20,10 @@ _Avoid_: questionnaire, form
 
 **Gate**:
 A per-domain readiness flag (`training_ready` / `nutrition_ready`) that is
-false while any blocking field gating that domain is missing. Gates are soft:
+false while any blocking field gating that domain is missing. A field can
+block conditionally (`gate_condition`): PCOS and oligomenorrhea do not block a
+male profile, body-fat % blocks only for a cutting goal (fat_loss / ripped).
+Gates are soft:
 they stop the coach from *volunteering* plans, not from answering.
 _Avoid_: blocking requirement, hard gate
 
