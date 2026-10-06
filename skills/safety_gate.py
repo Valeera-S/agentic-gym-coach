@@ -11,7 +11,8 @@ Flow:
      entries are matched case/whitespace-insensitively and by their current
      canonical identity, so a ban stored as the user said it ("skull
      crusher") still blocks the canonical query ("Skull Crusher").
-  3. If a match: unsafe + return that row's safe_alternatives. The caller
+  3. If a match: unsafe + the matching rows' safe_alternatives, merged and
+     filtered so none is itself banned (empty list + `message` if none survive). The caller
      MUST NOT suggest the exercise; offer the alternatives.
   4. Else: safe. When the name itself didn't map to a catalog entry, the
      reason says so — an unmapped name may be a misspelling of a banned
@@ -27,7 +28,7 @@ from __future__ import annotations
 from models import SafetyResult, canonicalize
 from models.exercise_catalog import ban_match_names
 
-from .injuries import contraindication_hits
+from .injuries import contraindication_hits, unbanned
 
 
 def check_exercise_safety(exercise: str) -> SafetyResult:
@@ -41,10 +42,16 @@ def check_exercise_safety(exercise: str) -> SafetyResult:
             reason += (" — exercise name not in the catalog; confirm the spelling "
                        "and the injury ban list with the user before suggesting")
         return SafetyResult(exercise=can_name, safe=True, reason=reason)
-    location, status, alts = rows[0]
+    location, status, _alts = rows[0]
+    # Alternatives are merged from EVERY row that bans this exercise (stable:
+    # row order, then list order) and then filtered through the gate against
+    # all current bans — a banned alternative is never offered (P33).
+    alts = unbanned(a for _l, _s, row_alts in rows for a in row_alts)
     return SafetyResult(
         exercise=can_name,
         safe=False,
-        alternatives=list(alts) if alts else [],
+        alternatives=alts,
         reason=f"{location}: {status} — exercise contraindicated",
+        message="" if alts else ("no safe alternative is on file for this exercise "
+                                 "— do not suggest it; ask the user or offer a different movement pattern"),
     )

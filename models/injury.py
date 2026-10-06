@@ -45,3 +45,5 @@ class SafetyResult(BaseModel):
     safe: bool
     alternatives: list[str] = Field(default_factory=list)
     reason: str = ""
+    # Set only when unsafe and no stored alternative passes the gate.
+    message: str = ""

@@ -109,3 +109,25 @@ def test_seed_rejects_non_list_or_blank_names_and_writes_nothing(field, bad):
     with pytest.raises(ValueError):
         seed_injury("left_knee", "active", 4, **{field: bad})
     assert _injury_rows() == 0
+
+
+# --- P33: seed rejects alternatives the row's own bans would block ----------
+
+def test_seed_rejects_alternative_blocked_by_own_ban_naming_it():
+    with pytest.raises(ValueError, match="Cable Fly"):
+        seed_injury("left_shoulder", "active", 4,
+                    contraindicated_exercises=["Fly"],
+                    safe_alternatives=["Pec Deck", "Cable Fly"])
+    assert _injury_rows() == 0
+
+
+def test_seed_rejects_alternative_equal_via_alias_or_generic():
+    with pytest.raises(ValueError, match="Dumbbell Fly"):
+        seed_injury("left_shoulder", "active", 4,
+                    contraindicated_exercises=["Dumbbell Fly"],
+                    safe_alternatives=["dumbbell fly"])
+    with pytest.raises(ValueError, match="Fly"):  # generic alt covers a banned variant
+        seed_injury("left_shoulder", "active", 4,
+                    contraindicated_exercises=["Dumbbell Fly"],
+                    safe_alternatives=["Fly"])
+    assert _injury_rows() == 0

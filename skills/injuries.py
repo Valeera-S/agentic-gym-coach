@@ -22,7 +22,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from models import InjurySeedResult, InjuryState, InjuryStatus, PainLocation, canonicalize
-from models.exercise_catalog import lookup_key, resolve_name
+from models.exercise_catalog import ban_match_names, lookup_key, resolve_name
 
 from .init import get_duckdb
 
@@ -90,7 +90,8 @@ def seed_injury(location: str, status: str, severity: int,
     """Validate, canonicalize, and insert one injury row.
 
     Raises pydantic ValidationError on out-of-vocabulary location/status or
-    out-of-range severity — nothing is written. Canonical alias hits are
+    out-of-range severity, and ValueError for a malformed name list or a
+    safe_alternative the row's own bans would block (P33) — nothing is written. Canonical alias hits are
     stored under the canonical name; unmapped names are stored verbatim and
     listed in `needs_review` for user confirmation.
     """
@@ -101,6 +102,12 @@ def seed_injury(location: str, status: str, severity: int,
     )
     stored_contra, review = _canonicalize_names(injury.contraindicated_exercises)
     stored_alts, alt_review = _canonicalize_names(injury.safe_alternatives)
+    self_banned = [a for a in stored_alts if blocked_by(a, stored_contra)]
+    if self_banned:
+        raise ValueError(
+            "safe_alternatives that this row's own contraindicated_exercises "
+            f"would block: {', '.join(self_banned)} — offer only exercises that "
+            "pass the gate; nothing was written")
 
     get_duckdb().execute(
         f"INSERT INTO injury_status ({_COLS}) VALUES (?, ?, ?, ?, ?)",
@@ -114,6 +121,43 @@ def seed_injury(location: str, status: str, severity: int,
     return InjurySeedResult(injury=stored, needs_review=sorted(set(review + alt_review)))
 
 
+def _ban_keys(entries: Iterable[str | None]) -> set[str]:
+    """Lookup keys a list of stored ban entries covers: each entry's own text
+    and its current canonical identity (case/whitespace-insensitive)."""
+    keys: set[str] = set()
+    for entry in entries:
+        if entry is None:  # not producible by seed_injury; skip, don't crash the gate
+            continue
+        keys.add(lookup_key(entry))
+        canon = resolve_name(entry)
+        if canon:
+            keys.add(lookup_key(canon))
+    return keys
+
+
+def blocked_by(name: str, ban_entries: Iterable[str | None]) -> bool:
+    """True when a ban list blocks `name` — the ONE definition of "banned",
+    shared by the gate, its alternatives filter and the seed-time check.
+    Resolves aliases, legacy names and generic<->variant exactly as the gate
+    does (exercise_catalog.ban_match_names)."""
+    wanted = {lookup_key(n) for n in ban_match_names(name)}
+    return bool(_ban_keys(ban_entries) & wanted)
+
+
+def _live_rows() -> list[tuple[str, str, list[str], list[str]]]:
+    """Non-resolved injury rows (newest first) as (location, status, bans, alts)."""
+    rows = get_duckdb().execute(
+        """
+        SELECT location, status, contraindicated_exercises, safe_alternatives
+        FROM injury_status
+        WHERE status <> 'resolved'
+        ORDER BY updated_at DESC, rowid DESC
+        """
+    ).fetchall()
+    return [(loc, st, list(contra or []), [a for a in (alts or []) if a is not None])
+            for loc, st, contra, alts in rows]
+
+
 def contraindication_hits(names: Iterable[str]) -> list[tuple[str, str, list[str]]]:
     """Non-resolved injury rows (newest first) that ban any of `names`.
 
@@ -125,27 +169,23 @@ def contraindication_hits(names: Iterable[str]) -> list[tuple[str, str, list[str
     blocking. `names` comes from exercise_catalog.ban_match_names().
     """
     wanted = {lookup_key(n) for n in names}
-    rows = get_duckdb().execute(
-        """
-        SELECT location, status, contraindicated_exercises, safe_alternatives
-        FROM injury_status
-        WHERE status <> 'resolved'
-        ORDER BY updated_at DESC
-        """
-    ).fetchall()
-    hits = []
-    for location, status, contra, alts in rows:
-        for entry in contra or []:
-            if entry is None:  # not producible by seed_injury; skip, don't crash the gate
-                continue
-            keys = {lookup_key(entry)}
-            canon = resolve_name(entry)
-            if canon:
-                keys.add(lookup_key(canon))
-            if keys & wanted:
-                hits.append((location, status, [a for a in (alts or []) if a is not None]))
-                break
-    return hits
+    return [(loc, st, alts) for loc, st, contra, alts in _live_rows()
+            if _ban_keys(contra) & wanted]
+
+
+def unbanned(candidates: Iterable[str]) -> list[str]:
+    """`candidates` (order kept, duplicates dropped) minus every name that ANY
+    current ban blocks. The gate offers only what passes the gate itself —
+    a stored alternative list can go stale when a later row bans one of them (P33)."""
+    all_bans = [e for _l, _s, contra, _a in _live_rows() for e in contra]
+    out, seen = [], set()
+    for name in candidates:
+        key = lookup_key(name)
+        if key in seen or blocked_by(name, all_bans):
+            continue
+        seen.add(key)
+        out.append(name)
+    return out
 
 
 def tendon_summary() -> dict[str, Any]:

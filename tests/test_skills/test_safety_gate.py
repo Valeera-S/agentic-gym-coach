@@ -80,3 +80,41 @@ def test_ban_on_unknown_name_ignores_hyphen_vs_space():
     # not in the catalog at all: the raw spellings still meet through lookup_key
     _seed_injury(contra=["Zercher-Squat Hold"], alts=["Leg Press"])
     assert check_exercise_safety("zercher squat hold").safe is False
+
+
+# --- P33: the gate never offers an alternative that is itself banned --------
+
+def test_generic_ban_alternatives_that_are_variants_are_not_offered():
+    # ban on generic "Fly": Cable Fly / Machine Fly are variants -> banned too
+    _seed_injury(contra=["Fly"], alts=["Push-Up", "Pec Deck", "Cable Fly"])  # Pec Deck = Machine Fly
+    r = check_exercise_safety("Dumbbell Fly")
+    assert r.safe is False
+    assert "Cable Fly" not in r.alternatives and "Machine Fly" not in r.alternatives
+    assert r.alternatives == ["Push-Up"]
+    for alt in r.alternatives:
+        assert check_exercise_safety(alt).safe is True
+
+
+def test_alternative_banned_by_another_row_is_dropped_and_others_merged():
+    _seed_injury(loc="left_shoulder", contra=["Barbell Bench Press"],
+                 alts=["Dumbbell Bench Press", "Push-Up"])
+    _seed_injury(loc="right_shoulder", contra=["Dumbbell Bench Press", "Barbell Bench Press"],
+                 alts=["Cable Crossover"])
+    r = check_exercise_safety("Barbell Bench Press")
+    assert r.safe is False
+    assert "Dumbbell Bench Press" not in r.alternatives
+    # merged from every matching row, de-duplicated, deterministic order
+    assert r.alternatives == ["Cable Crossover", "Push-Up"]  # newest row first
+    assert check_exercise_safety("Barbell Bench Press").alternatives == r.alternatives
+
+
+def test_no_surviving_alternative_gives_empty_list_and_message():
+    _seed_injury(contra=["Fly"], alts=["Cable Fly"])
+    r = check_exercise_safety("Dumbbell Fly")
+    assert r.safe is False
+    assert r.alternatives == []
+    assert "no safe alternative" in r.message.lower()
+
+
+def test_safe_result_has_no_message():
+    assert check_exercise_safety("Squat").message == ""
