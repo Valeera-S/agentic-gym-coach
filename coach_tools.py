@@ -223,9 +223,8 @@ def cmd_session_detail(args: dict):
 
 @_accepts(model="SessionAmendInput")
 def cmd_session_amend(args: dict):
-    from models import SessionAmendInput
-    from skills.sessions import amend_session
-    data = SessionAmendInput.model_validate(args)  # rejected before any write
+    from skills.sessions import amend_session, parse_amend_input
+    data = parse_amend_input(args)  # rejected before any write
     return amend_session(data).model_dump(mode="json")
 
 

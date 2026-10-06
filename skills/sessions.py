@@ -45,6 +45,7 @@ from models import (
     SessionChange,
     SessionDetail,
     SessionInput,
+    SessionKind,
     WeightUnit,
 )
 from models.exercise_catalog import classify, default_load_type, lookup_key, resolve_name
@@ -440,6 +441,50 @@ def _not_carried_on_rename(ex, replaced: dict, restated_muscle: bool) -> list[An
     return flags
 
 
+def parse_amend_input(args: dict) -> SessionAmendInput:
+    """Validate a coach_session_amend argument dict against the stored session.
+
+    The stored session is handed to validation as context so an exercise
+    restated UNCHANGED (and the stored date restated as is) is not re-checked
+    against today's input rules: rows older code wrote can hold values the
+    rules reject, and the coach must still be able to fix another exercise of
+    that session (P58). Changed and new exercises are validated in full. An
+    unknown session id falls through to plain validation (amend_session then
+    reports it)."""
+    context = None
+    sid = args.get("session_id") if isinstance(args, dict) else None
+    if isinstance(sid, (str, UUID)):
+        try:
+            snap = _snapshot(sid if isinstance(sid, UUID) else UUID(sid))
+        except ValueError:
+            snap = None
+        if snap is not None:
+            context = {"stored_exercises": snap["exercises"] or [],
+                       "stored_date": date.fromisoformat(snap["date"])}
+    return SessionAmendInput.model_validate(args, context=context)
+
+
+def _stored_flags(e: dict | None, index: int) -> list[AnomalyFlag]:
+    """The anomaly flags of an exercise kept exactly as stored, derived from
+    the stored values like coach_session_detail does."""
+    e = e or {}
+    name = e.get("name") or f"exercise {index}"
+    flags: list[AnomalyFlag] = []
+    if _needs_review(e.get("name"), e.get("muscle_source")):
+        flags.append(AnomalyFlag(
+            code=AnomalyCode.needs_review,
+            detail=_review_text(e["name"], e.get("muscle_group"), e.get("muscle_source"))
+            if e.get("name") else f"exercise entry {index} has no name"))
+    if e.get("pain_flag"):
+        flags.append(AnomalyFlag(code=AnomalyCode.pain_flag, detail=f"{name}: pain during exercise"))
+    fq = e.get("form_quality")
+    if fq is not None and fq < 3:
+        flags.append(AnomalyFlag(
+            code=AnomalyCode.form_quality_low,
+            detail=f"{name}: form_quality={fq} (volume -50% downstream)"))
+    return flags
+
+
 def amend_session(data: SessionAmendInput) -> SessionChange:
     """Replace a session's date and exercises, keeping its id (and created_at).
 
@@ -454,16 +499,29 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
     if before is None:
         raise ValueError(f"no session with id {sid}")
     removed = _removed(before["exercises"], data.exercises)
-    keep, carry_flags = _provenance_to_keep(data.exercises, before["exercises"])
-    fresh = SessionInput(
-        date=data.date, exercises=data.exercises,
+    # exercises restated unchanged that today's input rules reject (legacy rows,
+    # P58) are kept exactly as stored; everything else is prepared as a fresh log
+    live = [ex for ex in data.exercises if not ex.keep_stored]
+    keep, carry_flags = _provenance_to_keep(live, before["exercises"])
+    # model_construct: kept stored values (a legacy date, post_feedback, ...) are
+    # not re-checked; every value the caller sent was validated at parse time
+    fresh = SessionInput.model_construct(
+        date=data.date, exercises=live,
         phase=data.phase or (PhaseType(before["phase"]) if before["phase"] else None),
-        kind=data.kind or before["kind"],
+        kind=SessionKind(data.kind or before["kind"]),
         pre_recovery_score=_amended(data, "pre_recovery_score", before),
         post_feedback=_amended(data, "post_feedback", before),
     )
-    phase, structs, flags = prepare_session(fresh, keep)
+    phase, prepared, flags = prepare_session(fresh, keep)
     flags = carry_flags + flags
+    prepared_iter = iter(prepared)
+    structs = []
+    for ex in data.exercises:
+        if ex.keep_stored:
+            structs.append(dict(before["exercises"][ex.index]))
+            flags = flags + _stored_flags(before["exercises"][ex.index], ex.index)
+        else:
+            structs.append(next(prepared_iter))
 
     def work():
         get_duckdb().execute(

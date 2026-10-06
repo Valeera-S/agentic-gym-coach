@@ -169,7 +169,11 @@ def coach_session_amend(session_id: str, date: str, exercises: list[dict],
     `removed_exercises` (index, name, ...; nameless older entries included). Read-back-only keys (raw_name, muscle_source,
     entered_weight, ...) -> invalid_input. An exercise restated unchanged keeps what was recorded
     (raw name, weight + unit, load_type, muscle provenance; an older entry whose name the catalog
-    now maps to another identity is canonicalized, with that name kept as its raw_name). Omit
+    now maps to another identity is canonicalized, with that name kept as its raw_name). Legacy
+    values today's input rules reject stay as stored when that exercise is restated unchanged (so
+    another exercise of the session can be fixed); a changed or new exercise is validated in full.
+    An explicit null for reps/rpe/weight_kg = not recorded; for form_quality/pain_flag = the default
+    (on an unchanged restatement: keep what is stored). Omit
     muscle_group to re-derive it (fixes an old guess); confirm_muscle=true records it as the user's;
     on a rename (same index, different exercise) a muscle_group equal to the old exercise's (even
     one the user had set; confirm_muscle=true keeps it, a different muscle_group is your own
