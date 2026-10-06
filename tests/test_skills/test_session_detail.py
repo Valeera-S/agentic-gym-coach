@@ -208,6 +208,22 @@ def test_sessions_listing_stays_fast_on_a_large_limit():
     assert dt_ms < 100, f"listing took {dt_ms:.1f}ms"
 
 
+def test_listing_memo_holds_a_page_with_thousands_of_distinct_pairs():
+    """P20: the (name, source) memo was smaller than a large page's distinct
+    pairs, so a cyclic scan evicted every entry before it was reused and a warm
+    listing re-resolved every name. A second listing must not miss at all."""
+    from skills.sessions import _needs_review, list_sessions
+    get_duckdb().execute(
+        "INSERT INTO sessions (date, phase, exercises) SELECT DATE '2026-01-01', 'maintenance', "
+        "[{'name': 'Odd Pull ' || CAST(i AS VARCHAR), 'muscle_source': 'keyword', 'sets': 1}] "
+        "FROM range(5000) t(i)")
+    list_sessions(5000)
+    misses = _needs_review.cache_info().misses
+    out = list_sessions(5000)
+    assert len(out) == 5000 and all(s["needs_review"] == 1 for s in out)
+    assert _needs_review.cache_info().misses == misses
+
+
 def test_listing_counts_match_an_independent_recount():
     """Adversarial page: ties on date, NULL / empty lists, odd sources."""
     from skills.sessions import _needs_review, list_sessions
@@ -227,7 +243,7 @@ def test_listing_counts_match_an_independent_recount():
                     and _needs_review(e["name"], e["muscle_source"])) for _, exs in rows]
     for limit in (0, 1, 7, 30, 31, 100):
         got = list_sessions(limit)
-        assert [g["id"] for g in got] == [r[0] for r in rows][:limit]
+        assert [g["id"] for g in got] == [str(r[0]) for r in rows][:limit]
         assert [g["needs_review"] for g in got] == expected[:limit]
 
 

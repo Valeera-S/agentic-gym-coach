@@ -73,10 +73,11 @@ def _f32(x: float | None) -> float | None:
     return x
 
 
-@lru_cache(maxsize=4096)
+@lru_cache(maxsize=1 << 16)
 def _needs_review(name: str | None, source: str | None) -> bool:
-    # memoized: a listing asks this for the same few (name, source) pairs
-    # thousands of times, and the answer depends on nothing else
+    # memoized: the answer depends on nothing else. Sized above any realistic
+    # page's distinct pairs: a smaller LRU is evicted in full by one cyclic
+    # scan of a large page and then never hits
     if name is None:
         return True  # not producible by the logger; never assume it is confirmed
     known = resolve_name(name) is not None
@@ -145,34 +146,42 @@ def list_sessions(limit: int) -> list[dict]:
 
     No exercise data and no dataframe library cross into Python (a CLI call
     must stay inside its 0.5 s budget, and Polars/pyarrow alone cost ~0.3 s to
-    import). DuckDB groups the page's exercises by (name, muscle_source) with
-    the page positions each pair occurs at; each distinct pair is decided once
-    here (the catalog lookup, memoized) and its positions are counted. Cost is
-    linear in the page's exercises; each distinct pair is decided only once.
-    Exercises without a name (not producible by the logger) are skipped, as
-    session detail skips them.
+    import). One query returns the page's rows (with their rowid); a second
+    groups the page's exercises by (name, muscle_source) with the rowids each
+    pair occurs at. Each distinct pair is decided once (the catalog lookup,
+    memoized) and its rowids are counted onto their page positions. The page
+    is sorted only once: when it holds the whole table (the usual large-limit
+    call) the second query needs no page restriction, and it skips
+    catalog-sourced exercises (never flagged). `id` comes back as its string
+    form: building 10,000 UUID objects alone cost ~13 ms, and every surface
+    serializes it to a string anyway. Cost is linear in the page's exercises. Exercises without a name (not producible by the
+    logger) are skipped, as session detail skips them.
     """
     d = get_duckdb()
     rows = d.execute(
-        "SELECT id, date, phase, pre_recovery_score, post_feedback, kind FROM sessions "
+        "SELECT rowid, CAST(id AS VARCHAR), date, phase, pre_recovery_score, post_feedback, kind "
+        "FROM sessions "
         f"ORDER BY {_ORDER} LIMIT ?", [limit]).fetchall()
+    if not rows:
+        return []
+    total = d.execute("SELECT count(*) FROM sessions").fetchone()[0]
+    page = "" if len(rows) == total else (
+        f"WHERE rowid IN (SELECT rowid FROM sessions ORDER BY {_ORDER} LIMIT ?)")
     pairs = d.execute(
-        f"""WITH page AS (
-                SELECT id, row_number() OVER (ORDER BY {_ORDER}) - 1 AS pos
-                FROM sessions ORDER BY {_ORDER} LIMIT ?)
-            SELECT e.name, e.muscle_source, list(pos)
-            FROM (SELECT p.pos, UNNEST(s.exercises) AS e
-                  FROM page p JOIN sessions s USING (id))
+        f"""SELECT e.name, e.muscle_source, list(rid)
+            FROM (SELECT rowid AS rid, UNNEST(exercises) AS e FROM sessions {page})
             WHERE e IS NOT NULL AND e.name IS NOT NULL
+              AND e.muscle_source IS DISTINCT FROM 'catalog'  -- never flagged (_needs_review)
             GROUP BY e.name, e.muscle_source""",
-        [limit]).fetchall()
+        [limit] if page else []).fetchall()
+    position = {r[0]: i for i, r in enumerate(rows)}
     counts = [0] * len(rows)
-    for name, source, positions in pairs:
+    for name, source, rids in pairs:
         if _needs_review(name, source):
-            for pos in positions:
-                counts[pos] += 1
+            for rid in rids:
+                counts[position[rid]] += 1
     cols = ["id", "date", "phase", "pre_recovery_score", "post_feedback", "kind"]
-    return [{**dict(zip(cols, r)), "needs_review": n} for r, n in zip(rows, counts)]
+    return [{**dict(zip(cols, r[1:])), "needs_review": n} for r, n in zip(rows, counts)]
 
 
 def _row_to_detail(row: tuple) -> SessionDetail:
