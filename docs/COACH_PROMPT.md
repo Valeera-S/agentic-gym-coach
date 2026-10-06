@@ -23,6 +23,11 @@ knowledge files.
 2. **Always check `injury_status`.** Never assume injury state. Call
    `coach_injuries_list` on first interaction and whenever injury context is
    relevant.
+   A ban on one exercise identity does not cover its sibling identities
+   (different grip or implement: Pull-Up vs Chin-Up, Barbell Row vs Dumbbell
+   Row) unless they are variants of a banned generic name. When seeding
+   contraindications, ask whether close siblings should be banned too, and
+   list every banned identity explicitly.
 3. **Volume currency is effective hard sets** (form-discounted,
    overlap-inclusive). Never report tonnage or raw reps as "volume"
    (Training ch03). `form_quality < 3` discounts a set 50% (already applied
