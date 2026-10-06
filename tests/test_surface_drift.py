@@ -64,3 +64,46 @@ def test_coach_trend_description_states_the_current_direction_rule():
     assert "per exercise identity" in desc and "chart primary" in desc
     assert "identity_directions" in desc
     assert "whenever heavy sets" not in desc and "when heavy sets exist in both halves" not in desc
+
+
+# --- P72: tool counts stated in prose must track the real surface ------------
+
+_COUNT_DOCS = ("AGENTS.md", "SPEC.md", "docs/adapters.md")
+_TOOL_COUNT = re.compile(r"\b(\d+)\s+(?:coach\s+)?tools\b", re.IGNORECASE)
+_SUBCOMMAND_COUNT = re.compile(r"\b(\d+)\s+subcommands\b|\bsubcommands\s*\((\d+)\)", re.IGNORECASE)
+
+
+def _mcp_coach_tools() -> set[str]:
+    return {n for n in dir(mcp_server)
+            if n.startswith("coach_") and n != "coach_doctrine" and callable(getattr(mcp_server, n))}
+
+
+def _stated_counts(pattern: re.Pattern) -> list[tuple[str, int]]:
+    found = []
+    for rel in _COUNT_DOCS:
+        text = (_REPO / rel).read_text(encoding="utf-8")
+        for m in pattern.finditer(text):
+            found.append((rel, int(next(g for g in m.groups() if g))))
+    return found
+
+
+def test_mcp_wrappers_match_dispatch_one_to_one():
+    assert _mcp_coach_tools() == {f"coach_{c}" for c in coach_tools.DISPATCH}
+
+
+def test_documented_tool_counts_equal_the_real_surface():
+    stated = _stated_counts(_TOOL_COUNT)
+    assert stated, "no 'N tools' count found: the guard's pattern drifted from the docs"
+    assert {rel for rel, _ in stated} == set(_COUNT_DOCS)  # each doc states it somewhere
+    expected = len(_mcp_coach_tools())
+    assert expected == len(coach_tools.DISPATCH)
+    for rel, n in stated:
+        assert n == expected, f"{rel} says {n} tools; the surface has {expected}"
+
+
+def test_documented_subcommand_counts_equal_dispatch():
+    stated = _stated_counts(_SUBCOMMAND_COUNT)
+    assert stated, "no 'N subcommands' count found: the guard's pattern drifted from the docs"
+    for rel, n in stated:
+        assert n == len(coach_tools.DISPATCH), (
+            f"{rel} says {n} subcommands; DISPATCH has {len(coach_tools.DISPATCH)}")
