@@ -327,3 +327,30 @@ def test_bodyweight_text_fields_are_checked_too():
     for field, bad in (("notes", "a\x00"), ("scale", "x\ud800")):
         with pytest.raises(Exception):
             BodyweightInput(date=date(2026, 10, 1), condition="fed", weight_kg=80, **{field: bad})
+
+
+# --- P57: Windows line endings are valid free text; names and tempo take no control chars ---
+
+def test_crlf_is_allowed_in_free_text_fields():
+    from models.bodyweight import BodyweightInput
+    ex = ExerciseModel(name="Squat", sets=1, notes="felt good\r\nsecond line\r\n\tdeep")
+    assert ex.notes == "felt good\r\nsecond line\r\n\tdeep"
+    s = SessionInput(date=D, post_feedback="ok\r\nfine", exercises=[ex])
+    assert s.post_feedback == "ok\r\nfine"
+    b = BodyweightInput(date="2026-10-01", condition="morning_fasted", weight_kg=80,
+                        scale="bath\r\nscale", notes="a\r\nb")
+    assert b.scale == "bath\r\nscale" and b.notes == "a\r\nb"
+
+
+@pytest.mark.parametrize("bad", ["a\nb", "a\rb", "a\tb", "a\r\nb"])
+@pytest.mark.parametrize("field", ["name", "tempo"])
+def test_names_and_tempo_allow_no_control_characters_at_all(field, bad):
+    kw = {"name": "Squat", "sets": 1, field: bad}
+    with pytest.raises(Exception, match="control"):
+        ExerciseModel(**kw)
+
+
+@pytest.mark.parametrize("bad", ["a\x00b", "a\x0bb", "a\x1bb"])
+def test_other_control_characters_still_rejected_in_free_text(bad):
+    with pytest.raises(Exception, match="control"):
+        ExerciseModel(name="Squat", sets=1, notes=bad)

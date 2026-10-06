@@ -82,10 +82,15 @@ class ExerciseModel(BaseModel):
     def _valid_name(cls, v: str) -> str:
         return clean_name(v)
 
-    @field_validator("tempo", "notes")
+    @field_validator("notes")
     @classmethod
-    def _clean_text_fields(cls, v: str | None, info) -> str | None:
+    def _clean_notes(cls, v: str | None, info) -> str | None:
         return clean_text(v, info.field_name)
+
+    @field_validator("tempo")
+    @classmethod
+    def _clean_tempo(cls, v: str | None, info) -> str | None:
+        return clean_text(v, info.field_name, allowed=())  # single-line: no control chars
 
     @field_validator("reps", "rpe", "weight_kg")
     @classmethod
