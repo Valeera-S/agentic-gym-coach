@@ -133,6 +133,34 @@ class NextRound(BaseModel):
     fields: list[str] = Field(default_factory=list)
 
 
+class FieldSummary(BaseModel):
+    """The compact per-field view (coach_intake_status default): what the scan
+    found, without the question/options/source/note prose."""
+
+    name: str
+    status: FieldStatus
+    value: Any = None
+    blocks_now: bool = False
+    round: int | None = None
+    gates: GateDomain
+
+
+class FieldDetail(BaseModel):
+    """A field's full definition, as the coach needs it to ask the question."""
+
+    name: str
+    source: str
+    question: str = ""
+    options: list[IntakeOption] = Field(default_factory=list)
+    note: str = ""
+
+
+class DetailedNextRound(NextRound):
+    """NextRound plus the full definition of exactly the fields it lists."""
+
+    field_details: list[FieldDetail] = Field(default_factory=list)
+
+
 class IntakeReport(BaseModel):
     """Return of intake.assess_intake() — the whole checklist, scanned.
 
@@ -421,3 +449,19 @@ INTAKE_CHECKLIST: list[IntakeField] = [
               "male: blocks only when sex is female or still unknown"),
     ),
 ]
+
+
+class IntakeSummary(BaseModel):
+    """Compact assess_intake() result (coach_intake_status default): the same
+    keys as IntakeReport, but `fields` are FieldSummary and `next_round` also
+    carries the full definitions of the fields it lists."""
+
+    fields: list[FieldSummary] = Field(default_factory=list)
+    weeks_since_last_session: float | None = None
+    training_ready: bool = False
+    nutrition_ready: bool = False
+    missing: list[str] = Field(default_factory=list)
+    missing_by_gate: dict[str, list[str]] = Field(default_factory=dict)
+    progress: dict[str, DomainProgress] = Field(default_factory=dict)
+    rounds_total: int = 0
+    next_round: DetailedNextRound | None = None

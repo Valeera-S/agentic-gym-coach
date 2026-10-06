@@ -200,10 +200,14 @@ def cmd_snapshot(args: dict):
     return generate_phase_snapshot().model_dump(mode="json")
 
 
-@_accepts()
+@_accepts("detail")
 def cmd_intake_status(args: dict):
-    from skills.intake import assess_intake
-    return assess_intake().model_dump(mode="json")
+    from skills.intake import assess_intake, assess_intake_compact
+    detail = args.get("detail", False)
+    if not isinstance(detail, bool):
+        raise ValueError(f"detail must be a boolean, got {type(detail).__name__}")
+    report = assess_intake() if detail else assess_intake_compact()
+    return report.model_dump(mode="json")
 
 
 @_accepts("limit")

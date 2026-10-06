@@ -27,7 +27,11 @@ from typing import Any
 from models import (
     INTAKE_CHECKLIST,
     INTAKE_ROUND_TITLES,
+    DetailedNextRound,
     DomainProgress,
+    FieldDetail,
+    FieldSummary,
+    IntakeSummary,
     FieldReport,
     FieldStatus,
     GateCondition,
@@ -175,3 +179,28 @@ def assess_intake(today: date | None = None) -> IntakeReport:
         rounds_total=rounds_total,
         next_round=next_round,
     )
+
+
+def summarize(report: IntakeReport) -> IntakeSummary:
+    """The compact view of a full report: per-field {name, status, value,
+    blocks_now, round, gates}; `next_round` gains the full definition of the
+    fields it lists, so the next round can be asked without the other ~30."""
+    by_name = {r.name: r for r in report.fields}
+    nr = report.next_round
+    detailed = None
+    if nr is not None:
+        detailed = DetailedNextRound(
+            **nr.model_dump(),
+            field_details=[FieldDetail(**by_name[n].model_dump(
+                include={"name", "source", "question", "options", "note"})) for n in nr.fields])
+    return IntakeSummary(
+        fields=[FieldSummary(**r.model_dump(
+            include={"name", "status", "value", "blocks_now", "round", "gates"}))
+            for r in report.fields],
+        next_round=detailed,
+        **report.model_dump(exclude={"fields", "next_round"}))
+
+
+def assess_intake_compact(today: date | None = None) -> IntakeSummary:
+    """assess_intake() in its compact form (the coach_intake_status default)."""
+    return summarize(assess_intake(today))

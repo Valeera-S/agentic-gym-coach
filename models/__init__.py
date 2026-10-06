@@ -26,6 +26,10 @@ from .intake import (
     IntakeField,
     IntakeOption,
     IntakeReport,
+    IntakeSummary,
+    FieldSummary,
+    FieldDetail,
+    DetailedNextRound,
     NextRound,
 )
 from .profile import (
@@ -120,6 +124,10 @@ __all__ = [
     "NextRound",
     "IntakeField",
     "IntakeReport",
+    "IntakeSummary",
+    "FieldSummary",
+    "FieldDetail",
+    "DetailedNextRound",
     "AvailabilityWindow",
     "Weekday",
     "StressLevel",

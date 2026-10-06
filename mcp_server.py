@@ -140,9 +140,9 @@ def coach_snapshot() -> dict:
 
 
 @mcp.tool()
-def coach_intake_status() -> dict:
-    """Run the standardized intake scan: collected vs missing bucket-list fields (each citing its book source), per-domain readiness (training/nutrition soft gates), and weeks since the last logged training session (habit sessions excluded). Also returns guided-round state: `progress` (done/total per domain), `rounds_total`, `next_round` (the round to ask next and its missing fields; null when every round is done), and per field its `round`, plain-language `question` and `options` (each with `means`, `effect`, `source`; show the effect before the user chooses). Read-only — ask the user only for what's missing."""
-    return _run("intake_status", {})
+def coach_intake_status(detail: bool = False) -> dict:
+    """Run the standardized intake scan: per bucket-list field {name, status, value, blocks_now, round, gates}, per-domain readiness (training/nutrition soft gates), and weeks since the last logged training session (habit sessions excluded). Also returns guided-round state: `progress` (done/total per domain), `rounds_total`, and `next_round` (the round to ask next, its missing `fields`, and `field_details`: for exactly those fields the full definition — plain-language `question`, `options` each with `means`, `effect`, `source` (show the effect before the user chooses), `note`, `source`; null when every round is done). detail=true returns every field with its full definition too (large; use only to answer about a field outside next_round). Read-only — ask the user only for what's missing."""
+    return _run("intake_status", {"detail": detail})
 
 
 @mcp.tool()
