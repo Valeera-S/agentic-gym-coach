@@ -26,6 +26,7 @@ from pydantic import Strict, StrictInt  # noqa: E402
 from typing import Annotated  # noqa: E402
 
 import coach_tools  # noqa: E402
+import crash_log  # noqa: E402
 
 mcp = MCPServer(name="gym-coach")
 
@@ -307,4 +308,6 @@ def coach_doctrine(topic: str | None = None) -> str:
 
 
 if __name__ == "__main__":
+    # P73: leave evidence if the process dies (the client keeps no server stderr)
+    crash_log.install()
     mcp.run()
