@@ -73,7 +73,7 @@ _ENTRIES: tuple[Exercise, ...] = (
     Exercise("Smith Bench Press", ("Smith Machine Bench Press", "Smith Flat Bench Press"), TOT),
     Exercise("Machine Chest Press", ("Chest Press", "Chest Press Machine",
                                      "Seated Chest Press"), MS),
-    Exercise("Close-Grip Bench Press", ("Close Grip Bench Press", "CGBP"), TOT),
+    Exercise("Close-Grip Bench Press", ("Close Grip Bench", "CGBP"), TOT),
     Exercise("Incline Bench Press", ("Incline Press",), generic=True,
              variants=("Barbell Incline Bench Press", "Dumbbell Incline Press",
                        "Smith Incline Press", "Machine Incline Press")),
@@ -102,15 +102,15 @@ _ENTRIES: tuple[Exercise, ...] = (
     Exercise("Cable Fly", ("Cable Crossover", "Cable Crossover Fly", "Cable Chest Fly"), PS),
     Exercise("Machine Fly", ("Pec Deck", "Pec Deck Fly", "Machine Chest Fly"), MS),
     # --- vertical pull --------------------------------------------------------
-    Exercise("Pull-Up", ("Pull Up", "Pullup", "Close Grip Pull-Up"), BW),
+    Exercise("Pull-Up", ("Pullup", "Close Grip Pull-Up"), BW),
     Exercise("Lat Pulldown", ("Pulldown", "Cable Pulldown", "Wide Grip Pulldown",
-                              "Neutral Grip Pulldown", "Lat Pull-Down", "Lat Pull Down"), MS),
+                              "Neutral Grip Pulldown", "Lat Pull-Down"), MS),
     # A converging-arm (iso-lateral) pulldown machine: a different machine from
     # the cable-bar "Lat Pulldown", so its loads are a different identity.
     Exercise("Machine Lat Pulldown", ("Converging Lat Pulldown",
                                       "Iso-Lateral Lat Pulldown"), MS),
     # --- pullover / lat pushdown -----------------------------------------------
-    Exercise("Straight Arm Pulldown", ("Straight-Arm Pulldown", "Straight Arm Lat Pulldown"), MS),
+    Exercise("Straight Arm Pulldown", ("Straight Arm Lat Pulldown",), MS),
     # --- horizontal pull ------------------------------------------------------
     Exercise("Row", ("Wide Grip Row",), generic=True,
              variants=("Pendlay Row", "Cable Row", "Machine Row", "Reverse Row",
@@ -121,8 +121,7 @@ _ENTRIES: tuple[Exercise, ...] = (
     Exercise("Machine Row", ("Seated Machine Row",), MS),
     # Prone on a ~45 degree bench; Training ch09's accessory menu names
     # chest-supported rows among the lumbar-sparing rows.
-    Exercise("Chest-Supported Dumbbell Row", ("Chest Supported Dumbbell Row",
-                                              "Chest-Supported DB Row", "Incline Dumbbell Row",
+    Exercise("Chest-Supported Dumbbell Row", ("Chest-Supported DB Row", "Incline Dumbbell Row",
                                               "Incline Bench Dumbbell Row"), PH),
     Exercise("Reverse Row", ("Wide Grip Reverse Row",)),
     # --- squat ----------------------------------------------------------------
@@ -164,7 +163,7 @@ _ENTRIES: tuple[Exercise, ...] = (
     Exercise("Dumbbell Curl", ("DB Curl",), PH, M.biceps),
     Exercise("Leg Extension", (), MS, M.quads),
     Exercise("Leg Curl", (), MS, M.hamstrings),
-    Exercise("Single-Leg Curl", ("Single Leg Curl",), MS, M.hamstrings),
+    Exercise("Single-Leg Curl", (), MS, M.hamstrings),
     Exercise("Cable Kickback", ("Cable Glute Kickback",), MS, M.glutes),
     Exercise("Calf Raise", (), target=M.calves, generic=True, variants=("Smith Calf Raise",)),
     Exercise("Smith Calf Raise", (), TOT, M.calves),
@@ -177,13 +176,20 @@ _ENTRIES: tuple[Exercise, ...] = (
 CATALOG: dict[str, Exercise] = {e.name: e for e in _ENTRIES}
 
 
+_SEPARATORS = str.maketrans("-_", "  ")
+
+
 def lookup_key(name: str) -> str:
     """Normalize a name for catalog lookup: lower case, outer whitespace
-    trimmed, inner runs of whitespace collapsed ("lat   pulldown"). The
+    trimmed, '-' and '_' read as spaces ("chest-supported" == "chest
+    supported"), inner runs of whitespace collapsed ("lat   pulldown"). The
     safety gate normalizes stored ban entries with this same function
     (skills/injuries.py); both sides must normalize identically or
-    canonicalization and the ban match stop composing (adversarial F1)."""
-    return " ".join(name.split()).lower()
+    canonicalization and the ban match stop composing (adversarial F1; P24).
+    This is the ONLY normalization site — never inline a variant of it.
+    Hyphen/space spellings are one key, so never list them as separate
+    aliases (the catalog build rejects a name claimed twice)."""
+    return " ".join(name.translate(_SEPARATORS).split()).lower()
 
 
 def _derive() -> tuple[dict[str, MuscleGroup], dict[str, list[MuscleGroup]]]:
@@ -442,7 +448,7 @@ _GAP = r".{0,40}?"
 
 def _kw(*words: str) -> str:
     """Whole-word alternatives, each with an optional plural."""
-    return r"\b(?:" + "|".join(re.escape(w) for w in words) + r")(?:e?s)?\b"
+    return r"\b(?:" + "|".join(re.escape(lookup_key(w)) for w in words) + r")(?:e?s)?\b"
 
 
 _KEYWORD_RULES: list[tuple[str, MuscleGroup]] = [

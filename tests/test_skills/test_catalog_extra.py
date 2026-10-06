@@ -24,6 +24,24 @@ def test_alias_hits_are_case_insensitive():
         assert canonicalize(raw) == ("Barbell Overhead Press", MuscleGroup.front_delt, False)
 
 
+def test_hyphen_space_underscore_spellings_resolve_to_one_identity():
+    # P24: '-' and '_' read as spaces, so "db row" spellings reach the alias
+    for raw in ("chest supported db row", "Chest-Supported DB Row", "chest_supported_db_row",
+                "chest supported dumbbell row", "Chest-Supported Dumbbell Row"):
+        assert canonicalize(raw)[0] == "Chest-Supported Dumbbell Row", raw
+    for raw in ("pull up", "Pull-Up", "pull_up"):
+        assert canonicalize(raw)[0] == "Pull-Up", raw
+
+
+def test_close_grip_bench_is_an_alias_of_close_grip_bench_press():
+    for raw in ("Close Grip Bench", "close-grip bench", "Close Grip Bench Press"):
+        assert canonicalize(raw)[0] == "Close-Grip Bench Press", raw
+
+
+def test_lookup_key_normalization_contract():
+    assert lookup_key("  Chest_Supported--Dumbbell   Row ") == "chest supported dumbbell row"
+
+
 def test_case_variant_keeps_its_secondary_overlap():
     # "incline bench press" used to miss the table, so trend_analysis credited
     # no secondaries and under-counted triceps/side_delt hard sets
