@@ -105,12 +105,16 @@ def window_start(end: date, window_days: int) -> date:
 # columns plus `sets` in an inner query, adds SET_COUNT_SQL in a middle one and
 # splices PADDED_SET_ARRAYS_SQL into the outer select; every reader that
 # explodes the three arrays together uses this pair.
-SET_COUNT_SQL = ("greatest(coalesce(sets, 0), coalesce(len(reps_raw), 0), "
-                 "coalesce(len(rpe_raw), 0), coalesce(len(weight_raw), 0)) AS _n")
+#
+# P47: a legacy row's arrays may also disagree with each other or with `sets`.
+# `sets` is the authority: every array is aligned to it — padded with NULL
+# (unrecorded) when shorter, truncated when longer — so they always explode
+# to the same row count.
+SET_COUNT_SQL = "greatest(coalesce(sets, 0), 0) AS _n"
 PADDED_SET_ARRAYS_SQL = """
-        coalesce(reps_raw, list_transform(range(_n), x -> NULL::FLOAT)) AS reps,
-        coalesce(rpe_raw, list_transform(range(_n), x -> NULL::FLOAT)) AS rpe,
-        coalesce(weight_raw, list_transform(range(_n), x -> NULL::DOUBLE)) AS weight_kg"""
+        list_resize(coalesce(reps_raw, []::FLOAT[]), _n) AS reps,
+        list_resize(coalesce(rpe_raw, []::FLOAT[]), _n) AS rpe,
+        list_resize(coalesce(weight_raw, []::DOUBLE[]), _n) AS weight_kg"""
 
 
 def _fetch_entries(start: date, end: date) -> pl.DataFrame:
@@ -166,6 +170,8 @@ def hard_sets_by_muscle(start: date, end: date) -> dict[str, float]:
     df = _with_form_mult(df)
     out: dict[str, float] = {}
     for name, mg, sets, mult in df.select("name", "mg", "sets", "form_mult").iter_rows():
+        if name is None:
+            continue  # legacy nameless entry: credits no muscle (P47)
         for m in credited_muscles(name, mg):
             out[m] = out.get(m, 0.0) + (sets or 0) * mult
     return {k: float(v) for k, v in out.items()}
@@ -279,7 +285,8 @@ def get_specialization_trend(
     # end_date lets the coach analyze/backtest historical slices; default today.
     anchor = end_date or date.today()
     start = window_start(anchor, window_days)
-    df = _fetch_entries(start, anchor)
+    # a legacy nameless entry credits no muscle (P47), whatever its stored muscle
+    df = _fetch_entries(start, anchor).filter(pl.col("name").is_not_null())
 
     crediting = list(exercises_crediting(muscle))
     df = with_identity(df).filter(

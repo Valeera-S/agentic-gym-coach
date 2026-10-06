@@ -124,7 +124,7 @@ def test_null_set_arrays_do_not_crash_readers_and_count_as_unrecorded(nulled):
 
 # --- P28: explode() states Polars' current empty-array behavior ---------------
 
-def test_empty_arrays_explode_to_one_null_row_without_polars_warnings():
+def test_empty_arrays_pad_to_sets_without_polars_warnings():
     import warnings
     from skills.init import get_duckdb
     from skills.snapshot import generate_phase_snapshot
@@ -139,7 +139,7 @@ def test_empty_arrays_explode_to_one_null_row_without_polars_warnings():
         r = get_specialization_trend(MuscleGroup.quads, window_days=28, end_date=today)
         generate_phase_snapshot()
     assert r.effective_volume == pytest.approx(3.0)   # hard sets come from `sets`, not rows
-    assert r.detail["unloaded_sets"] == 1             # an empty array stays ONE null row
+    assert r.detail["unloaded_sets"] == 3             # P47: an empty array pads to `sets` null rows
 
 
 # --- P29: window_days=N is exactly N calendar days ending at end_date ---------
@@ -171,3 +171,39 @@ def test_snapshot_window_is_28_days_not_29():
     lifts = generate_phase_snapshot().specialization_lifts
     assert "Incline Bench Press" in lifts      # day 27 back: last day of the 28-day window
     assert "Pull-Up" not in lifts              # day 28 back: outside
+
+
+# --- P47: legacy rows — nameless entries and mismatched per-set arrays ---------
+
+def test_nameless_entry_credits_no_muscle_and_does_not_crash_readers():
+    from skills.init import get_duckdb
+    from skills.snapshot import generate_phase_snapshot
+    today = date.today()
+    _log(today - timedelta(days=1), [40.0, 40.0], name="Squat")
+    get_duckdb().execute(_NULL_ARRAY_UPDATE.format(
+        reps="x.reps", rpe="x.rpe", weight="x.weight_kg").replace(
+        "name := x.name", "name := NULL::VARCHAR"))
+    vol = hard_sets_by_muscle(today - timedelta(days=7), today)
+    assert vol == {}                                   # credits no muscle
+    generate_phase_snapshot()
+    r = get_specialization_trend(MuscleGroup.quads, window_days=28, end_date=today)
+    assert r.effective_volume == 0.0
+
+
+@pytest.mark.parametrize("reps,rpe,weight,n_weights", [
+    ("[5, 5]::FLOAT[]", "[8]::FLOAT[]", "[100, 100, 100, 100]::DOUBLE[]", 3),  # short + long
+    ("[5]::FLOAT[]", "[]::FLOAT[]", "[100]::DOUBLE[]", 1),
+    ("[5, 5, 5, 5, 5]::FLOAT[]", "[8, 8, 8, 8, 8]::FLOAT[]", "[100, 100, 100, 100, 100]::DOUBLE[]", 3),
+])
+def test_mismatched_set_array_lengths_align_to_sets(reps, rpe, weight, n_weights):
+    from skills.init import get_duckdb
+    from skills.snapshot import generate_phase_snapshot
+    today = date.today()
+    for back in (3, 2, 1, 0):
+        _log(today - timedelta(days=back), [40.0, 40.0, 40.0], name="Squat")
+    get_duckdb().execute(_NULL_ARRAY_UPDATE.format(reps=reps, rpe=rpe, weight=weight))
+    r = get_specialization_trend(MuscleGroup.quads, window_days=28, end_date=today)
+    assert r.effective_volume == pytest.approx(12.0)    # sets, not array lengths
+    generate_phase_snapshot()
+    # unrecorded (padded) weights are counted per stored `sets`, 3 per session
+    assert r.detail["unloaded_sets"] == 4 * (3 - n_weights)
