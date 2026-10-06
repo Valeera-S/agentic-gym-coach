@@ -61,6 +61,25 @@ def set_profile(profile: UserProfile) -> UserProfile:
     return profile
 
 
+def merge_profile(incoming: UserProfile, fields: set[str]) -> UserProfile:
+    """Merge `fields` of an already validated `incoming` profile into the stored
+    one and store the result (P71): a field named in `fields` overwrites, one not
+    named keeps its stored value. `goals`, when named, replaces the whole goal
+    list (audited by set_profile exactly as before). With no stored profile the
+    incoming one is stored as is. The stored profile is read leniently, so an
+    old value that today's input rules reject never blocks editing another
+    field. A result that would be an all-default profile is refused, like an
+    empty first profile (it would silently disarm the intake's empty-profile
+    signal)."""
+    prev = get_profile()
+    merged = incoming if prev is None else prev.model_copy(
+        update={k: getattr(incoming, k) for k in fields})
+    if merged.model_copy(update={"updated_at": None}) == UserProfile():
+        raise ValueError("profile would be empty — provide at least one field "
+                         "(goals, training_age, days_per_week, bodyweight_kg, ...)")
+    return set_profile(merged)
+
+
 def derive_priority_muscles(profile: UserProfile | None) -> list:
     """Priority muscles: declared > goal targets > [] (balanced programming).
 

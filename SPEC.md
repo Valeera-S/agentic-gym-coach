@@ -41,7 +41,7 @@ Volume currency = effective hard sets per muscle per week: sets × form_mult (fo
 - snapshot.generate_phase_snapshot() -> PhaseSnapshot (incl. computed block_state + session_gap); session_gap(today) -> weeks since the last training session (habits excluded) + staleness verdict (threshold REASSESSMENT_GAP_WEEKS, a labeled heuristic)  (<200ms)
 - bodyweight.log_bodyweight(BodyweightInput) -> BodyweightReading; list_readings(start, end); summarize(start, end) -> mean + reading count + distinct days per condition (ConditionAverage: condition, readings, days, mean_kg; never blended); bodyweight_history(window_days, end) -> readings + last-7-days and window summaries (window_start semantics: N calendar days ending at end, inclusive); fasted_mean_7d(end) feeds the snapshot
 - intake.assess_intake() -> IntakeReport — standardized bucket-list scan (models/intake.py INTAKE_CHECKLIST): collected vs missing per field, soft per-domain readiness gates; read-only
-- profile.get_profile()/set_profile()/derive_priority_muscles()
+- profile.get_profile()/set_profile()/merge_profile() (coach_profile_set merges: absent keys keep, null clears)/derive_priority_muscles()
 - memory.add_note()/search_notes()  (Tier 3, manual-save policy)
 - visual_delta.compare_photos(a, b) -> VisualDelta  (stub; optional vision API)
 

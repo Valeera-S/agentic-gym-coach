@@ -287,11 +287,16 @@ def cmd_profile_get(args: dict):
     return p.model_dump(mode="json") if p else {"profile": None}
 
 
+def _field_default(model, key: str):
+    """What an explicit null clears a model field to: its default ([] for a list)."""
+    return model.model_fields[key].get_default(call_default_factory=True)
+
+
 @_accepts(model="UserProfile")
 def cmd_profile_set(args: dict):
     from models import UserProfile
     from models import AvailabilityWindow, Goal
-    from skills.profile import set_profile
+    from skills.profile import merge_profile
     # `updated_at` is what coach_profile_get returns but the server owns it:
     # accepted and ignored, so a get -> edit -> set round trip keeps working.
     args = {k: v for k, v in args.items() if k != "updated_at"}
@@ -301,13 +306,14 @@ def cmd_profile_set(args: dict):
             for i, item in enumerate(items):
                 if isinstance(item, dict):
                     _check_keys(item, set(model.model_fields), f"{key}[{i}]")
-    profile = UserProfile.model_validate(args)
-    if profile == UserProfile():
-        # An all-default profile would silently disarm the intake's empty-profile
-        # signal (adversarial F3): refuse instead of writing it.
+    if not args:
         raise ValueError("profile is empty — provide at least one field "
                          "(goals, training_age, days_per_week, bodyweight_kg, ...)")
-    return set_profile(profile).model_dump(mode="json")
+    # MERGE (P71): keys present overwrite, keys absent keep the stored value, an
+    # explicit null clears that field (a list field to [], any other to None).
+    cleaned = {k: _field_default(UserProfile, k) if v is None else v for k, v in args.items()}
+    incoming = UserProfile.model_validate(cleaned)  # strict, before any write
+    return merge_profile(incoming, set(args)).model_dump(mode="json")
 
 
 @_accepts("text", "kind", "tags")

@@ -249,7 +249,7 @@ def coach_profile_get() -> dict:
 
 @mcp.tool()
 def coach_profile_set(profile: dict) -> dict:
-    """Create/update the user profile (validated, versioned; goal changes audited). Echo it to the user after setting. An all-empty profile is refused. An unknown field (also inside goals / weekly_availability) is invalid_input, never dropped; `updated_at` from coach_profile_get is accepted and ignored."""
+    """Create or MERGE-update the user profile (validated, versioned; goal changes audited). Send only the fields to change: a key present overwrites that field, a key absent keeps its stored value, an explicit null clears that field (null clears a list field to []); `goals`, when present, replaces the whole goal list. The first call creates the profile. Echo the result to the user after setting. A result with every field empty is refused. An unknown field (also inside goals / weekly_availability) is invalid_input, never dropped; `updated_at` from coach_profile_get is accepted and ignored, so a get then set round trip works."""
     return _run("profile_set", profile)
 
 
