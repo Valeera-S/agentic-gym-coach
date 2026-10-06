@@ -82,6 +82,46 @@ def test_form_discount_applies_to_tonnage_and_sets():
     assert vol["side_delt"] == pytest.approx(3.0)
 
 
+# --- P26: a NULL per-set array reads as "every set unrecorded" ----------------
+
+_NULL_ARRAY_UPDATE = """
+    UPDATE sessions SET exercises = list_transform(exercises, x -> struct_pack(
+        name := x.name, muscle_group := x.muscle_group, sets := x.sets,
+        reps := {reps}, rpe := {rpe}, weight_kg := {weight},
+        tempo := x.tempo, form_quality := x.form_quality, pain_flag := x.pain_flag,
+        notes := x.notes, raw_name := x.raw_name, muscle_source := x.muscle_source,
+        load_type := x.load_type, entered_weight := x.entered_weight,
+        entered_unit := x.entered_unit))
+"""
+
+
+@pytest.mark.parametrize("nulled", [("weight",), ("rpe",), ("reps",),
+                                    ("reps", "rpe"), ("reps", "rpe", "weight")])
+def test_null_set_arrays_do_not_crash_readers_and_count_as_unrecorded(nulled):
+    from coach_tools import DISPATCH
+    from skills.init import get_duckdb
+    from skills.snapshot import generate_phase_snapshot
+    today = date.today()
+    for back in (3, 2, 1, 0):
+        _log(today - timedelta(days=back), [40.0, 40.0, 40.0], name="Squat")
+    cols = {"reps": "x.reps", "rpe": "x.rpe", "weight": "x.weight_kg"}
+    for k in nulled:
+        cols[k] = "NULL::DOUBLE[]" if k == "weight" else "NULL::FLOAT[]"
+    get_duckdb().execute(_NULL_ARRAY_UPDATE.format(**cols))
+
+    r = get_specialization_trend(MuscleGroup.quads, window_days=28, end_date=today)
+    assert r.effective_volume == pytest.approx(12.0)      # sets still count
+    assert r.sessions_in_window == 4
+    if "weight" in nulled:                                # padded to `sets`, not 1 row
+        assert r.detail["unloaded_sets"] == 12
+        assert r.est_1rm_kg is None
+    assert "tonnage_kg" in r.detail
+    generate_phase_snapshot()                             # explodes the same arrays
+    DISPATCH["recovery"]({})
+    DISPATCH["sessions"]({})
+    DISPATCH["session_detail"]({"date": str(today)})
+
+
 # --- P29: window_days=N is exactly N calendar days ending at end_date ---------
 
 def test_window_includes_day_n_minus_1_before_end_and_excludes_day_n():

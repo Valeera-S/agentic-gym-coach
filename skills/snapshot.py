@@ -39,7 +39,9 @@ from .injuries import tendon_summary
 from .metrics import epley_expr, qualifies_for_est_1rm
 from .phase import current_phase
 from .profile import derive_priority_muscles, get_profile
-from .trend_analysis import hard_sets_by_muscle, window_start, with_identity
+from .trend_analysis import (
+    PADDED_SET_ARRAYS_SQL, SET_COUNT_SQL, hard_sets_by_muscle, window_start, with_identity,
+)
 
 # Representative lifts. Each may be a generic / pre-split name: every concrete
 # identity in its family is reported under its OWN name, never pooled — the
@@ -85,16 +87,20 @@ def session_gap(today: date | None = None) -> SessionGap:
 
 
 def _fetch_all_sets(start: date, end: date) -> pl.DataFrame:
-    sql = """
-        SELECT date, name, reps, rpe, weight_kg, form_quality
+    sql = f"""
+        SELECT date, name, form_quality, {PADDED_SET_ARRAYS_SQL}
         FROM (
+          SELECT *, {SET_COUNT_SQL}
+          FROM (
             SELECT s.date,
                    UNNEST(s.exercises).name AS name,
-                   UNNEST(s.exercises).reps AS reps,
-                   UNNEST(s.exercises).rpe AS rpe,
-                   UNNEST(s.exercises).weight_kg AS weight_kg,
+                   UNNEST(s.exercises).sets AS sets,
+                   UNNEST(s.exercises).reps AS reps_raw,
+                   UNNEST(s.exercises).rpe AS rpe_raw,
+                   UNNEST(s.exercises).weight_kg AS weight_raw,
                    UNNEST(s.exercises).form_quality AS form_quality
             FROM sessions s WHERE s.date BETWEEN ? AND ?
+          )
         )
     """
     return get_duckdb().execute(sql, [start, end]).pl()

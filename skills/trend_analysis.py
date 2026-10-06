@@ -96,23 +96,43 @@ def window_start(end: date, window_days: int) -> date:
     return end - timedelta(days=window_days - 1)
 
 
+# P26: the per-set arrays of a stored exercise can be a NULL ARRAY (not an
+# array of nulls) — a row written outside log_session. Read it as "every set
+# unrecorded", the same way ExerciseModel pads an empty array: a list of None
+# as long as the exercise's sets. Without this, a NULL array explodes to ONE
+# null row while its sibling arrays explode to `sets` rows and Polars rejects
+# the mismatch. A reader selects the raw `reps_raw` / `rpe_raw` / `weight_raw`
+# columns plus `sets` in an inner query, adds SET_COUNT_SQL in a middle one and
+# splices PADDED_SET_ARRAYS_SQL into the outer select; every reader that
+# explodes the three arrays together uses this pair.
+SET_COUNT_SQL = ("greatest(coalesce(sets, 0), coalesce(len(reps_raw), 0), "
+                 "coalesce(len(rpe_raw), 0), coalesce(len(weight_raw), 0)) AS _n")
+PADDED_SET_ARRAYS_SQL = """
+        coalesce(reps_raw, list_transform(range(_n), x -> NULL::FLOAT)) AS reps,
+        coalesce(rpe_raw, list_transform(range(_n), x -> NULL::FLOAT)) AS rpe,
+        coalesce(weight_raw, list_transform(range(_n), x -> NULL::DOUBLE)) AS weight_kg"""
+
+
 def _fetch_entries(start: date, end: date) -> pl.DataFrame:
     """Entry-level rows: one row per exercise within a session."""
-    sql = """
-        SELECT date, kind, name, mg, sets, reps, rpe, weight_kg, form_quality, load_type
+    sql = f"""
+        SELECT date, kind, name, mg, sets, form_quality, load_type, {PADDED_SET_ARRAYS_SQL}
         FROM (
+          SELECT *, {SET_COUNT_SQL}
+          FROM (
             SELECT s.date,
                    s.kind AS kind,
                    UNNEST(s.exercises).name AS name,
                    CAST(UNNEST(s.exercises).muscle_group AS VARCHAR) AS mg,
                    UNNEST(s.exercises).sets AS sets,
-                   UNNEST(s.exercises).reps AS reps,
-                   UNNEST(s.exercises).rpe AS rpe,
-                   UNNEST(s.exercises).weight_kg AS weight_kg,
+                   UNNEST(s.exercises).reps AS reps_raw,
+                   UNNEST(s.exercises).rpe AS rpe_raw,
+                   UNNEST(s.exercises).weight_kg AS weight_raw,
                    UNNEST(s.exercises).form_quality AS form_quality,
                    UNNEST(s.exercises).load_type AS load_type
             FROM sessions s
             WHERE s.date BETWEEN ? AND ?
+          )
         )
     """
     return get_duckdb().execute(sql, [start, end]).pl()
