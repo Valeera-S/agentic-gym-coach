@@ -10,7 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .enums import WeightUnit
-from .session import LB_TO_KG
+from .session import LB_TO_KG, StrictNum
 
 MAX_BODYWEIGHT_KG = 400.0
 
@@ -32,9 +32,9 @@ class BodyweightInput(BaseModel):
 
     date: Date
     condition: WeighCondition
-    weight: float | None = None
+    weight: StrictNum | None = None  # a JSON number: never `true`, never "80" (P41)
     unit: WeightUnit | None = None
-    weight_kg: float | None = None
+    weight_kg: StrictNum | None = None
     scale: str | None = None
     notes: str | None = None
 

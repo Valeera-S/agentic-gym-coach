@@ -7,13 +7,17 @@ from __future__ import annotations
 
 import math
 from datetime import date, datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import (BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator,
-                      model_validator)
+from pydantic import (BaseModel, ConfigDict, Field, Strict, StrictBool, StrictInt,
+                      field_validator, model_validator)
 
 from .enums import AnomalyCode, LoadType, MuscleGroup, PhaseType, SessionKind, WeightUnit
+
+# A JSON number only: a bool (`true` read as 1.0) or a numeric string ("80")
+# is rejected instead of coerced (P41). An int is fine where a float is meant.
+StrictNum = Annotated[float, Strict()]
 
 # The international pound, exact by definition (1959 agreement).
 LB_TO_KG = 0.45359237
@@ -22,6 +26,8 @@ LB_TO_KG = 0.45359237
 # Upper bounds are generous human headroom, not physiology: they exist so
 # garbage (rpe=11, sets=1e9, weight=1e308) fails at the boundary instead of
 # poisoning volume sums or crashing at the DB layer (adversarial F5).
+_NULL_FOR_BODYWEIGHT = ("a recorded weight must be > 0 — send null (not 0) for a bodyweight "
+                        "or unrecorded set")
 _PER_SET_BOUNDS: dict[str, tuple[float, float]] = {
     "reps": (1, 100),  # a recorded rep count is >= 1; null = unrecorded (P37)
     "rpe": (1, 10),    # RPE scale is 1-10; null = unrecorded (P37)
@@ -57,15 +63,15 @@ class ExerciseModel(BaseModel):
 
     name: str
     muscle_group: MuscleGroup | None = None
-    sets: int = Field(ge=1, le=50)  # per-movement headroom; a 1e9 `sets` breaks every volume sum
-    reps: list[float | None] = Field(default_factory=list)
-    rpe: list[float | None] = Field(default_factory=list)  # 1-10, None = unrecorded
-    weight_kg: list[float | None] = Field(default_factory=list)  # per-set load; None=bodyweight/unrecorded
-    weight: list[float | None] = Field(default_factory=list)  # per-set load AS ENTERED, in `unit`
+    sets: StrictInt = Field(ge=1, le=50)  # per-movement headroom; a 1e9 `sets` breaks every volume sum
+    reps: list[StrictNum | None] = Field(default_factory=list)
+    rpe: list[StrictNum | None] = Field(default_factory=list)  # 1-10, None = unrecorded
+    weight_kg: list[StrictNum | None] = Field(default_factory=list)  # per-set load; None=bodyweight/unrecorded
+    weight: list[StrictNum | None] = Field(default_factory=list)  # per-set load AS ENTERED, in `unit`
     unit: WeightUnit | None = None  # unit of `weight`; never of weight_kg
     load_type: LoadType | None = None  # how the reading was taken; None = unknown
     tempo: str | None = None  # e.g. "3-1-X-1"
-    form_quality: int = Field(default=5, ge=1, le=5)
+    form_quality: StrictInt = Field(default=5, ge=1, le=5)
     pain_flag: bool = False
     notes: str | None = None
 
@@ -78,6 +84,8 @@ class ExerciseModel(BaseModel):
                 continue
             if not math.isfinite(x):
                 raise ValueError(f"{info.field_name} values must be finite numbers")
+            if info.field_name == "weight_kg" and x <= 0:
+                raise ValueError(f"weight_kg {_NULL_FOR_BODYWEIGHT} (got {x:g})")
             if not lo <= x <= hi:
                 raise ValueError(f"{info.field_name} values must be within {lo:g}..{hi:g} (got {x:g})")
         return v
@@ -93,8 +101,10 @@ class ExerciseModel(BaseModel):
     @classmethod
     def _sane_entered_weights(cls, v: list[float | None]) -> list[float | None]:
         for x in v:
-            if x is not None and (not math.isfinite(x) or x < 0):
-                raise ValueError(f"weight values must be finite and >= 0 (got {x:g})")
+            if x is not None and not math.isfinite(x):
+                raise ValueError(f"weight values must be finite numbers (got {x:g})")
+            if x is not None and x <= 0:
+                raise ValueError(f"weight {_NULL_FOR_BODYWEIGHT} (got {x:g})")
         return v
 
     @model_validator(mode="after")
@@ -181,7 +191,7 @@ class SessionInput(BaseModel):
 
     date: date
     phase: PhaseType | None = None
-    pre_recovery_score: int | None = Field(default=None, ge=0, le=100)
+    pre_recovery_score: StrictInt | None = Field(default=None, ge=0, le=100)
     exercises: list[ExerciseModel]
     post_feedback: str | None = None
     kind: SessionKind = SessionKind.training
@@ -287,7 +297,7 @@ class SessionAmendInput(BaseModel):
     exercises: list[AmendExerciseModel]
     phase: PhaseType | None = None
     kind: SessionKind | None = None
-    pre_recovery_score: int | None = Field(default=None, ge=0, le=100)
+    pre_recovery_score: StrictInt | None = Field(default=None, ge=0, le=100)
     post_feedback: str | None = None
     clear: list[Literal["post_feedback", "pre_recovery_score"]] = Field(default_factory=list)
 

@@ -165,3 +165,42 @@ def test_zero_rep_set_is_rejected_at_the_tool_so_it_cannot_count_as_a_hard_set()
     with pytest.raises(ValueError, match="reps"):
         DISPATCH["log_session"]({"date": "2026-10-01", "exercises": [
             {"name": "Squat", "sets": 1, "reps": [0], "weight_kg": [200]}]})
+
+
+# --- numeric input fields are JSON numbers, not booleans or strings (P41) ----------
+
+@pytest.mark.parametrize("kw", [
+    dict(sets=True), dict(sets="3"), dict(sets=3.0),
+    dict(sets=1, reps=[True]), dict(sets=1, reps=["5"]),
+    dict(sets=1, rpe=[True]), dict(sets=1, rpe=["8"]),
+    dict(sets=1, weight_kg=[True]), dict(sets=1, weight_kg=["80"]),
+    dict(sets=1, weight=["80"], unit="kg"), dict(sets=1, weight=[True], unit="kg"),
+    dict(sets=1, form_quality=True), dict(sets=1, form_quality="4"),
+])
+def test_exercise_numbers_reject_booleans_and_numeric_strings(kw):
+    with pytest.raises(Exception):
+        ExerciseModel(name="Squat", **kw)
+
+
+@pytest.mark.parametrize("bad", [True, "80", 80.5])
+def test_pre_recovery_score_must_be_an_integer_number(bad):
+    with pytest.raises(Exception):
+        SessionInput(date=date(2026, 10, 1), pre_recovery_score=bad,
+                     exercises=[ExerciseModel(name="Squat", sets=1)])
+
+
+def test_integers_are_still_fine_for_float_fields():
+    m = ExerciseModel(name="Squat", sets=1, reps=[5], rpe=[8], weight_kg=[100])
+    assert m.weight_kg == [100.0]
+
+
+@pytest.mark.parametrize("kw", [dict(weight_kg=[0]), dict(weight_kg=[0.0]),
+                                dict(weight=[0], unit="lb"), dict(weight=[0], unit="kg")])
+def test_a_zero_weight_is_rejected_and_points_to_null_for_bodyweight(kw):
+    with pytest.raises(Exception, match="null") as exc:
+        ExerciseModel(name="Pull-Up", sets=1, **kw)
+    assert "bodyweight" in str(exc.value)
+
+
+def test_null_weight_still_means_bodyweight_or_unrecorded():
+    assert ExerciseModel(name="Pull-Up", sets=2, weight_kg=[None, None]).weight_kg == [None, None]

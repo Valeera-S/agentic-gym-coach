@@ -268,3 +268,15 @@ def test_cli_subprocess_round_trip():
     assert p.returncode == 0 and len(json.loads(p.stdout)["readings"]) == 1
     p = run("bodyweight_log", {"date": "2026-10-06", "weight_kg": 72.45})
     assert p.returncode == 1 and json.loads(p.stdout)["error"] == "invalid_input"
+
+
+@pytest.mark.parametrize("kw", [dict(weight_kg=True), dict(weight_kg="80"),
+                                dict(weight="80", unit="kg"), dict(weight=True, unit="kg")])
+def test_bodyweight_numbers_reject_booleans_and_numeric_strings(kw):
+    """P41: `true` was stored as 1.0 kg and "80" as 80.0."""
+    with pytest.raises(Exception):
+        BodyweightInput(date=date(2026, 10, 1), condition="morning_fasted", **kw)
+
+
+def test_bodyweight_integer_number_still_accepted():
+    assert BodyweightInput(date=date(2026, 10, 1), condition="fed", weight_kg=80).weight_kg == 80.0
