@@ -15,6 +15,9 @@ once per session. Quirks handled (AGENTS.md `log.md format gotchas`):
 
 Run:  python scripts/ingest_log.py            (ingests log.md)
       python scripts/ingest_log.py --dry-run (parse only, no DB writes)
+      python scripts/ingest_log.py --reset   (replace ALL stored sessions; the whole file is
+                                              validated first and the swap is one transaction,
+                                              audited in decision_log as `sessions_reset`)
       python scripts/ingest_log.py --demo    (self-check: parse sample log, no DB writes)
 """
 
@@ -171,17 +174,43 @@ def parse_log_md(text: str) -> list[SessionInput]:
     return sessions
 
 
-def ingest(path: Path, dry_run: bool = False) -> int:
+def ingest(path: Path, dry_run: bool = False, reset: bool = False) -> int:
+    """Parse and validate the WHOLE file first (parse_log_md builds every
+    validated SessionInput); only then, in ONE transaction, delete (reset) and
+    insert everything. Any failure rolls back: nothing deleted, nothing written
+    (P65). A reset writes one decision_log entry with the counts."""
     text = path.read_text(encoding="utf-8")
     sessions = parse_log_md(text)
-    n = 0
-    for s in sessions:
-        if dry_run:
+    if dry_run:
+        for s in sessions:
             print(f"  would log {s.date}  exercises={len(s.exercises)}")
-        else:
+        return len(sessions)
+
+    import json
+    from models import DecisionEventType
+    from skills.init import get_duckdb
+    from skills.sessions import _in_transaction
+
+    def work() -> int:
+        d = get_duckdb()
+        deleted = 0
+        if reset:
+            deleted = d.execute("SELECT count(*) FROM sessions").fetchone()[0]
+            d.execute("DELETE FROM sessions")
+        for s in sessions:
             log_session(s)
-        n += 1
-    return n
+        if reset:
+            d.execute(
+                """INSERT INTO decision_log (event_type, trigger_signal, reasoning_chain, payload)
+                   VALUES (?, ?, ?, ?)""",
+                [DecisionEventType.sessions_reset.value,
+                 f"ingest_log --reset {path.name}",
+                 f"reset ingest: deleted {deleted} session(s), ingested {len(sessions)}",
+                 json.dumps({"deleted": deleted, "ingested": len(sessions),
+                             "source": str(path)}, ensure_ascii=False)])
+        return len(sessions)
+
+    return _in_transaction(work)
 
 
 def _demo() -> int:
@@ -202,12 +231,13 @@ def main(argv: list[str]) -> int:
     if not path.exists():
         print(f"log file not found at {path}", file=sys.stderr)
         return 1
-    if reset and not dry:
-        from skills.init import get_duckdb
-        get_duckdb().execute("DELETE FROM sessions")
-        print("cleared sessions table")
-    n = ingest(path, dry_run=dry)
-    print(f"{'parsed' if dry else 'ingested'} {n} sessions")
+    try:
+        n = ingest(path, dry_run=dry, reset=reset and not dry)
+    except Exception as e:  # nothing was deleted or written: say so, exit 1
+        print(f"ingest failed, nothing was changed: {type(e).__name__}: {e}", file=sys.stderr)
+        return 1
+    print(f"{'parsed' if dry else 'ingested'} {n} sessions"
+          + (" (sessions table reset first)" if reset and not dry else ""))
     return 0
 
 
