@@ -143,6 +143,15 @@ class ExerciseModel(BaseModel):
                 f"weight_kg={lengths['weight_kg']}); "
                 "use null entries for unrecorded sets"
             )
+        if non_empty and non_empty != {self.sets}:
+            # a recorded array describes exactly the sets performed: sets=2 with
+            # five reps and five weights would count 2 sets of volume but 5 of
+            # tonnage (P36). Empty arrays are padded below, never checked.
+            raise ValueError(
+                f"per-set arrays must have exactly `sets` entries (sets={self.sets}, got "
+                f"reps={lengths['reps']}, rpe={lengths['rpe']}, "
+                f"weight_kg/weight={lengths['weight_kg']}); fix `sets` or the arrays, "
+                "or leave an array empty if it was not recorded")
         target = max(non_empty) if non_empty else 0
         for name, n in lengths.items():
             if target and n == 0:

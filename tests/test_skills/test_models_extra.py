@@ -55,7 +55,7 @@ def test_sets_above_50_rejected():
 
 
 def test_null_rpe_entries_allowed():
-    m = ExerciseModel(**_ex(reps=[5, 5], rpe=[None, 8], weight_kg=[60.0, 60.0]))
+    m = ExerciseModel(**_ex(sets=2, reps=[5, 5], rpe=[None, 8], weight_kg=[60.0, 60.0]))
     assert m.rpe == [None, 8.0]
 
 
@@ -112,3 +112,33 @@ def test_availability_window_allows_open_ended_slots():
     # "Fri after 7" with no known close: start-only is the intended encoding.
     w = AvailabilityWindow(weekday=Weekday.fri, start="19:00")
     assert w.start == "19:00" and w.end is None
+
+
+# --- per-set arrays must match `sets` (P36) ----------------------------------------
+
+@pytest.mark.parametrize("field, value", [
+    ("reps", [5] * 5), ("rpe", [8] * 5), ("weight_kg", [100.0] * 5),
+    ("reps", [5]), ("weight_kg", [100.0, 100.0, 100.0]),
+])
+def test_non_empty_per_set_array_must_have_exactly_sets_entries(field, value):
+    with pytest.raises(Exception, match="sets"):
+        ExerciseModel(name="Leg Press", sets=2, **{field: value})
+
+
+def test_entered_weight_array_must_match_sets():
+    with pytest.raises(Exception, match="sets"):
+        ExerciseModel(name="Leg Press", sets=2, weight=[100, 100, 100, 100, 100], unit="kg")
+
+
+def test_leg_press_sets_2_with_five_entries_is_rejected_at_the_tool():
+    from coach_tools import DISPATCH, error_payload
+    with pytest.raises(ValueError) as exc:
+        DISPATCH["log_session"]({"date": "2026-10-01", "exercises": [
+            {"name": "Leg Press", "sets": 2, "reps": [5] * 5, "weight_kg": [100] * 5}]})
+    assert error_payload(exc.value)["error"] == "invalid_input"
+
+
+def test_matching_and_empty_arrays_still_accepted_and_padded():
+    m = ExerciseModel(name="Leg Press", sets=3, reps=[5, 5, 5])
+    assert m.rpe == [None] * 3 and m.weight_kg == [None] * 3
+    assert ExerciseModel(name="Leg Press", sets=3).reps == []
