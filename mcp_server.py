@@ -191,6 +191,28 @@ def coach_session_delete(session_id: str) -> dict:
 
 
 @mcp.tool()
+def coach_bodyweight_log(date: str, condition: str, weight: float | None = None,
+                         unit: str | None = None, weight_kg: float | None = None,
+                         scale: str | None = None, notes: str | None = None) -> dict:
+    """Record one bodyweight reading (several per date are fine). `condition` is REQUIRED:
+    morning_fasted | fed | post_workout | unknown (unknown only when the user truly doesn't know).
+    Send the number as read off the scale: weight + unit ('kg' | 'lb'; 1 lb = 0.45359237 kg), or weight_kg.
+    Bounds 0 < kg <= 400. scale = free text (e.g. "test scale"). Does NOT change profile.bodyweight_kg."""
+    return _run("bodyweight_log", {"date": date, "condition": condition, "weight": weight,
+                                   "unit": unit, "weight_kg": weight_kg, "scale": scale,
+                                   "notes": notes})
+
+
+@mcp.tool()
+def coach_bodyweight_history(window_days: int = coach_tools.DEFAULT_BODYWEIGHT_WINDOW_DAYS,
+                             end_date: str | None = None) -> dict:
+    """Bodyweight readings over a window (window_days calendar days ending at end_date inclusive, default today)
+    plus the mean and reading count PER CONDITION for the last 7 days and for the whole window.
+    Conditions are never mixed in one average - compare like with like (Nutrition ch02 weekly averages)."""
+    return _run("bodyweight_history", {"window_days": window_days, "end_date": end_date})
+
+
+@mcp.tool()
 def coach_injuries_list() -> dict:
     """Read the injury_status table (location, status, severity, contraindications, alternatives)."""
     return _run("injuries_list", {})

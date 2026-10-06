@@ -110,3 +110,10 @@ counts per_hand / per_side twice. NULL (unknown) on pre-0003 rows, and
 whenever none was given for an identity without a default (every generic
 name, every unknown name).
 _Avoid_: weight type
+
+**Bodyweight reading (bodyweight_log)**:
+One scale reading with a required measurement condition (morning_fasted, fed,
+post_workout, unknown). Averages are computed per condition, never blended; the
+snapshot's `body_weight_kg` is the 7-day morning_fasted mean (NULL when none).
+Logging a reading never rewrites `profile.bodyweight_kg`.
+_Avoid_: weigh-in (unqualified), daily weight

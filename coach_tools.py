@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT))
 # wrappers import these for their signature defaults — change them HERE only.
 DEFAULT_TREND_WINDOW_DAYS = 28
 DEFAULT_SESSIONS_LIMIT = 10
+DEFAULT_BODYWEIGHT_WINDOW_DAYS = 28
 DEFAULT_SEARCH_LIMIT = 20
 DEFAULT_MEMORY_KIND = "observation"
 DEFAULT_SESSION_KIND = "training"
@@ -134,6 +135,21 @@ def cmd_session_delete(args: dict):
     return delete_session(args["session_id"]).model_dump(mode="json")
 
 
+def cmd_bodyweight_log(args: dict):
+    from models.bodyweight import BodyweightInput
+    from skills.bodyweight import log_bodyweight
+    inp = BodyweightInput.model_validate(args)  # rejected before any write
+    return log_bodyweight(inp).model_dump(mode="json")
+
+
+def cmd_bodyweight_history(args: dict):
+    from skills.bodyweight import bodyweight_history
+    return bodyweight_history(
+        _int_arg(args, "window_days", DEFAULT_BODYWEIGHT_WINDOW_DAYS, minimum=1, maximum=3650),
+        _parse_date(args.get("end_date")) or date.today(),
+    ).model_dump(mode="json")
+
+
 def cmd_injuries_list(args: dict):
     from skills.injuries import list_injuries
     return [i.model_dump(mode="json") for i in list_injuries()]
@@ -221,6 +237,8 @@ _HANDLERS = {
     "session_detail": cmd_session_detail,
     "session_amend": cmd_session_amend,
     "session_delete": cmd_session_delete,
+    "bodyweight_log": cmd_bodyweight_log,
+    "bodyweight_history": cmd_bodyweight_history,
     "injuries_list": cmd_injuries_list,
     "injuries_seed": cmd_injuries_seed,
     "profile_get": cmd_profile_get,

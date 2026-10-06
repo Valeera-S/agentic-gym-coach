@@ -13,10 +13,11 @@ Precedence: (1) deterministic safety layer, (2) vendored skills (doctrine), (3) 
 2. DATA ARCHITECTURE
 Local-first embedded stack: DuckDB (data/gym_coach.duckdb), Polars (never Pandas), Pydantic V2 at every boundary, Alembic migrations (never hand-edit schema).
 
-2.1 Tables (post migration 0004)
+2.1 Tables (post migration 0005)
+- bodyweight_log — id UUID PK, date DATE, weight_kg DOUBLE (0 < kg <= 400), weight_entered DOUBLE + weight_unit VARCHAR ('kg' | 'lb', as entered; 1 lb = 0.45359237 kg), condition VARCHAR NOT NULL (vocab: WeighCondition in models/bodyweight.py — morning_fasted | fed | post_workout | unknown; required on input), scale VARCHAR, notes TEXT, created_at (0005; several readings per date allowed; never mixed across conditions in an average; downgrade refuses while rows exist; never auto-written into profile.bodyweight_kg)
 - sessions — date, phase VARCHAR (vocab: PhaseType enum in models/enums.py), pre_recovery_score, exercises STRUCT(name, muscle_group VARCHAR (vocab: MuscleGroup), sets, reps FLOAT[], rpe FLOAT[], weight_kg DOUBLE[], tempo, form_quality, pain_flag, notes, raw_name, muscle_source, load_type, entered_weight DOUBLE[], entered_unit)[], post_feedback, kind VARCHAR NOT NULL DEFAULT 'training' ('training' | 'habit' — a standing daily item done outside training: it counts toward volume but is excluded from recovery's training-load inputs (pain flagged in a habit still counts), the session-gap / staleness signal, deload block state and the modal-phase fallback; a modal tie goes to the phase of the latest session, then phase name). A NULL per-set array (reps / rpe / weight_kg) reads as "every set unrecorded" (padded to `sets`, like the model pads empty arrays). The per-exercise fields after `notes` were added by 0003 and are NULL on pre-0003 rows ("unknown"). `weight_kg` is the reading on the implement — per hand (dumbbells), per side (twin-stack cable), machine stack reading, or total plate load (a Smith machine's own bar weight is unknowable and excluded); `load_type` (per_hand | per_side | total | machine_stack | bodyweight, NULL = unknown) records which. A caller may log `weight` + `unit` ('kg' | 'lb') instead of `weight_kg`: weight_kg = weight × 0.45359237 for lb, and the entered values + unit are stored in `entered_weight` / `entered_unit` for read-back.
 - injury_status — location VARCHAR (vocab: PainLocation enum), status, severity 0–10, contraindicated_exercises[], safe_alternatives[]
-- phase_snapshots — snapshot_date PK, phase VARCHAR, body_weight_kg, waist_cm, specialization_lifts JSON, tendon_status_summary JSON, key_insight, next_phase_adjustment
+- phase_snapshots — snapshot_date PK, phase VARCHAR, body_weight_kg (7-day mean of morning_fasted bodyweight_log readings ending at the snapshot date; NULL when none — no fallback to other conditions or the profile), waist_cm, specialization_lifts JSON, tendon_status_summary JSON, key_insight, next_phase_adjustment
 - decision_log — event_type, trigger_signal, reasoning_chain, alternative_rejected, future_validation_tag, payload JSON (audit trail; `payload` added by 0004 holds the complete pre-change session row — plus the post-change row for amends — so an amended/deleted session can be restored from the audit entry alone)
 - user_profiles — id UUID PK, updated_at TIMESTAMPTZ, payload JSON (append-only history; latest row = current UserProfile; goal changes audited)
 - memory_notes — id UUID PK, created_at, kind, text, tags[] (Tier 3; manual-save only; substring/tag search)
@@ -38,6 +39,7 @@ Volume currency = effective hard sets per muscle per week: sets × form_mult (fo
 - metrics — shared Epley/est-1RM helpers (single definition)
 - phase.current_phase()/phase_for_logging() — single phase resolver
 - snapshot.generate_phase_snapshot() -> PhaseSnapshot (incl. computed block_state + session_gap); session_gap(today) -> weeks since the last training session (habits excluded) + staleness verdict (threshold REASSESSMENT_GAP_WEEKS, a labeled heuristic)  (<200ms)
+- bodyweight.log_bodyweight(BodyweightInput) -> BodyweightReading; list_readings(start, end); summarize(start, end) -> mean + count per condition (never blended); bodyweight_history(window_days, end) -> readings + last-7-days and window summaries (window_start semantics: N calendar days ending at end, inclusive); fasted_mean_7d(end) feeds the snapshot
 - intake.assess_intake() -> IntakeReport — standardized bucket-list scan (models/intake.py INTAKE_CHECKLIST): collected vs missing per field, soft per-domain readiness gates; read-only
 - profile.get_profile()/set_profile()/derive_priority_muscles()
 - memory.add_note()/search_notes()  (Tier 3, manual-save policy)
@@ -45,7 +47,7 @@ Volume currency = effective hard sets per muscle per week: sets × form_mult (fo
 
 4. SURFACES
 - CLI: python coach_tools.py <cmd> '<json>' (JSON stdout; {"error":...} + exit 1)
-- MCP: mcp_server.py (stdio; 16 coach tools + coach_doctrine) — the cross-runtime tool surface. Each tool call opens the DB and releases it on return (an idle server never locks the file).
+- MCP: mcp_server.py (stdio; 18 coach tools + coach_doctrine) — the cross-runtime tool surface. Each tool call opens the DB and releases it on return (an idle server never locks the file).
 - Persona: docs/COACH_PROMPT.md (canonical; renderable into native agent files via scripts/sync_adapters.py)
 - See docs/adapters.md. (The v1/v2 opencode native adapter was removed — MCP is the single tool surface.)
 

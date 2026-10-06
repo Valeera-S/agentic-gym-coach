@@ -187,7 +187,7 @@ INTAKE_CHECKLIST: list[IntakeField] = [
     IntakeField(
         name="bodyweight_kg", source="Nutrition ch02 (BW×10 maintenance, protein g/lb, %-BW rates), ch03, ch04 (fluids)",
         storage="profile.bodyweight_kg", gates=GateDomain.nutrition,
-        note="the single most load-bearing nutrition number; prefer the tracked snapshot series once available",
+        note="the single most load-bearing nutrition number; prefer the tracked series (coach_bodyweight_log; snapshot body_weight_kg = 7-day morning_fasted mean) when available",
     ),
     IntakeField(
         name="bodyfat_pct", source="Nutrition ch05 (refeed gate: ~12% M / ~20% F)",

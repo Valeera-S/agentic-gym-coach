@@ -31,10 +31,10 @@ Interpreter: use `.venv/bin/python` (repo venv) — bare `python` is not on PATH
 .venv/bin/python -m pytest -m slow -q    # 3 perf guards on 10K-row synthetic sets (run separately)
 .venv/bin/python scripts/ingest_log.py --dry-run [file]   # parse a log.md, no DB writes
 .venv/bin/python scripts/ingest_log.py --reset [file]     # ⚠ DELETE FROM sessions first, then re-ingest
-.venv/bin/python coach_tools.py          # dispatcher — prints available subcommands (16)
+.venv/bin/python coach_tools.py          # dispatcher — prints available subcommands (18)
 alembic upgrade head                    # apply migrations (bootstrap a fresh DB this way; honours GYM_COACH_DUCKDB, creates data/)
 .venv/bin/python scripts/sync_adapters.py    # render COACH_PROMPT.md → native agent files, if any registered (--check for drift)
-.venv/bin/python mcp_server.py          # MCP stdio server (16 tools + coach_doctrine)
+.venv/bin/python mcp_server.py          # MCP stdio server (18 tools + coach_doctrine; incl. coach_bodyweight_log / coach_bodyweight_history over migration 0005's `bodyweight_log` — every reading carries a required measurement condition and averages are per condition; the snapshot's body_weight_kg is the 7-day morning_fasted mean)
 ```
 
 No lint/typecheck config exists in this repo — don't invoke tools that aren't set up.
@@ -50,7 +50,7 @@ No lint/typecheck config exists in this repo — don't invoke tools that aren't 
 ## Dev gotchas
 - **Tests never touch production data.** `conftest.py` points `GYM_COACH_DUCKDB`/`GYM_COACH_LANCE` at throwaway files in `/tmp` and wipes tables around every test. Those env vars redirect the DB anywhere — but paths are read at `skills.init` import time, so set them before the first import.
 - **Zero-warning suite.** `pytest.ini` turns any DeprecationWarning raised from `skills/` into an error: pin the current behavior explicitly at the call (e.g. `explode(..., empty_as_null=True)`), never filter the warning away.
-- **Single-process pytest only** — pytest-xdist workers collide on the shared temp DB file.
+- **Parallel pytest runs are safe** — every run (e.g. two worktrees at once) gets its own `mkdtemp` DB + lance dir, removed at session end. Keep each run single-process (the suite is not tuned for xdist).
 - **DB connection lifecycle.** DuckDB allows one read-write process per file. Every coach tool runs inside `skills.init.connection_scope()`: the file is opened on first use and released when the call returns, so an idle MCP server never locks out alembic, `scripts/ingest_log.py` or the CLI. A genuine simultaneous-write collision surfaces as the `db` error ("... in use by another process ...") — no silent retries. Code outside any scope (tests, one-shot scripts) keeps its connection until `close_all()`.
 - **Migrations on the live DB.** After pulling a schema change run `alembic upgrade head` (safe while the MCP server sits idle). 0003 rebuilds `sessions` once (muscle vocabulary → VARCHAR, `upper_chest`→`chest`, provenance/load fields, `kind`); 0004 adds `decision_log.payload`. Both downgrades REFUSE, before changing anything, when data can't be represented — they never drop data silently. Never edit a committed migration.
 - **Coach tool layering:** `mcp_server.py` and the shell both wrap the same handlers in `coach_tools.py` (JSON to stdout; `{"error": ...}` + exit 1 on failure) → skill in `skills/`. Change handlers, never the wrappers.

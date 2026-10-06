@@ -12,8 +12,13 @@ mandatory-deload floor ("deload by the
 3rd mesocycle regardless", Training ch04). `session_gap` is likewise
 computed, not persisted: weeks since the last logged training session (habit sessions excluded) + whether the
 staleness threshold is crossed (a labeled heuristic — see
-REASSESSMENT_GAP_WEEKS below). body_weight_kg / waist_cm are
-None until a daily logging path exists — honest "I don't have that data".
+REASSESSMENT_GAP_WEEKS below). waist_cm is None until a logging path exists —
+honest "I don't have that data". body_weight_kg is the 7-day mean of
+`morning_fasted` bodyweight_log readings ending at the snapshot date, NULL when
+there are none: it deliberately does NOT fall back to other conditions or to
+profile.bodyweight_kg, because Nutrition ch02's weekly-average bodyweight
+trends are only valid like-for-like (a fed or post-workout reading adds noise
+larger than a week's real change).
 
 Insight targets come from the user profile's priority muscles; no profile ⇒
 the snapshot says so instead of inventing targets.
@@ -34,6 +39,7 @@ import polars as pl
 from models import PhaseSnapshot, SessionGap
 from models.exercise_catalog import legacy_family
 
+from .bodyweight import fasted_mean_7d
 from .init import get_duckdb
 from .injuries import tendon_summary
 from .metrics import epley_expr, qualifies_for_est_1rm
@@ -176,7 +182,7 @@ def generate_phase_snapshot() -> PhaseSnapshot:
     snap = PhaseSnapshot(
         snapshot_date=today,
         phase=current_phase(),
-        body_weight_kg=None,  # ponytail: no daily body_weight table yet — add when user logs it
+        body_weight_kg=fasted_mean_7d(today),
         waist_cm=None,
         specialization_lifts=spec_lifts,
         tendon_status_summary=tendon_summary(),
