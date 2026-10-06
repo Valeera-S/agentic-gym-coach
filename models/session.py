@@ -10,8 +10,8 @@ from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import (BaseModel, ConfigDict, Field, Strict, StrictBool, StrictInt,
-                      field_validator, model_validator)
+from pydantic import (BaseModel, ConfigDict, Field, PrivateAttr, Strict, StrictBool, StrictInt,
+                      ValidationError, field_validator, model_validator)
 
 from .dates import check_plausible_date
 from .text import clean_name, clean_text
@@ -76,6 +76,22 @@ class ExerciseModel(BaseModel):
     form_quality: StrictInt = Field(default=5, ge=1, le=5)
     pain_flag: bool = False
     notes: str | None = None
+
+    @field_validator("reps", "rpe", "weight_kg", mode="before")
+    @classmethod
+    def _null_array_is_not_recorded(cls, v):
+        # an explicit null means "not recorded", exactly like omitting the key (P58)
+        return [] if v is None else v
+
+    @field_validator("form_quality", mode="before")
+    @classmethod
+    def _null_form_quality_is_the_default(cls, v):
+        return 5 if v is None else v
+
+    @field_validator("pain_flag", mode="before")
+    @classmethod
+    def _null_pain_flag_is_the_default(cls, v):
+        return False if v is None else v
 
     @field_validator("name")
     @classmethod
@@ -255,6 +271,83 @@ _READ_BACK_ONLY = {
 }
 
 
+def _num(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _per_set_or_none(values, sets) -> list | None:
+    """A submitted per-set array as a comparable list (None / empty = unrecorded
+    for every set, padded to `sets` like the stored side); None if malformed."""
+    if values is None or values == []:
+        ok = isinstance(sets, int) and not isinstance(sets, bool) and sets > 0
+        return [None] * sets if ok else []
+    if not isinstance(values, list) or not all(x is None or _num(x) for x in values):
+        return None
+    return values
+
+
+def _same_arrays(a: list | None, b: list | None) -> bool:
+    return a is not None and b is not None and len(a) == len(b) and all(
+        (x is None and y is None)
+        or (x is not None and y is not None and math.isclose(x, y, rel_tol=1e-6, abs_tol=1e-9))
+        for x, y in zip(a, b))
+
+
+def stored_if_restated_unchanged(data, stored: list | None) -> dict | None:
+    """The stored exercise an amend exercise (raw input dict) restates UNCHANGED,
+    else None (P58). Unchanged = it references a stored exercise by `index` and
+    every logging field it sends equals what is stored: name exactly, muscle_group
+    (omitted counts as a change: it re-derives), sets, the per-set arrays (reps /
+    rpe / weight_kg, or weight + unit in kg terms; omitted or empty = unrecorded),
+    tempo, notes; load_type omitted or equal; form_quality / pain_flag an explicit
+    null (= keep) or equal. A key the model does not accept, `new`, or
+    `confirm_muscle` is never a plain restatement."""
+    allowed = set(AmendExerciseModel.model_fields)
+    if not isinstance(data, dict) or set(data) - allowed:
+        return None
+    idx = data.get("index")
+    if not isinstance(idx, int) or isinstance(idx, bool) or not 0 <= idx < len(stored or []):
+        return None
+    if data.get("new") or data.get("confirm_muscle"):
+        return None
+    s = (stored or [])[idx]
+    if not isinstance(s, dict):
+        return None
+    sets = data.get("sets")
+    if (s.get("name") is None or data.get("name") != s.get("name")
+            or data.get("muscle_group") != s.get("muscle_group")
+            or sets != s.get("sets") or isinstance(sets, bool)
+            or data.get("tempo") != s.get("tempo") or data.get("notes") != s.get("notes")):
+        return None
+    for key in ("reps", "rpe"):
+        stored_vals = list(s.get(key) or []) or _per_set_or_none([], sets)
+        if not _same_arrays(_per_set_or_none(data.get(key), sets), stored_vals):
+            return None
+    kg = data.get("weight_kg")
+    if data.get("weight"):
+        unit, w = data.get("unit"), data["weight"]
+        if unit not in ("kg", "lb") or not isinstance(w, list) or not all(x is None or _num(x) for x in w):
+            return None
+        f = LB_TO_KG if unit == "lb" else 1.0
+        kg = [None if x is None else x * f for x in w]
+        if data.get("weight_kg") and not _same_arrays(kg, _per_set_or_none(data["weight_kg"], sets)):
+            return None
+    elif data.get("unit") is not None:
+        return None
+    if not _same_arrays(_per_set_or_none(kg, sets),
+                        list(s.get("weight_kg") or []) or _per_set_or_none([], sets)):
+        return None
+    if data.get("load_type") is not None and data["load_type"] != s.get("load_type"):
+        return None
+    for key, default in (("form_quality", 5), ("pain_flag", False)):
+        if key in data and data[key] is None:
+            continue  # explicit null: keep what is stored
+        v = data.get(key, default)
+        if type(v) is not type(s.get(key)) or v != s.get(key):
+            return None
+    return s
+
+
 class AmendExerciseModel(ExerciseModel):
     """An exercise in coach_session_amend: ExerciseModel's input fields plus
     the link to what it amends.
@@ -276,6 +369,40 @@ class AmendExerciseModel(ExerciseModel):
     index: StrictInt | None = Field(default=None, ge=0)
     new: StrictBool = False
     confirm_muscle: StrictBool = False
+    # set by the wrap validator below only: this exercise restates a stored one
+    # unchanged whose values today's input rules reject, so it is kept as stored
+    _keep_stored: bool = PrivateAttr(default=False)
+
+    @property
+    def keep_stored(self) -> bool:
+        return self._keep_stored
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _restated_unchanged(cls, data, handler, info):
+        """P58: an exercise restated unchanged is not re-checked against the
+        input rules. Needs the stored exercises in the validation context
+        (`context={"stored_exercises": [...]}`); without it every exercise is
+        validated in full. A valid restatement flows as before (null
+        form_quality / pain_flag keep the stored values); one the rules reject
+        (legacy values), or whose stored form_quality / pain_flag is null,
+        is kept verbatim."""
+        stored = (info.context or {}).get("stored_exercises")
+        s = stored_if_restated_unchanged(data, stored) if stored is not None else None
+        if s is None:
+            return handler(data)
+        if s.get("form_quality") is not None and s.get("pain_flag") is not None:
+            data = {**data}
+            for key in ("form_quality", "pain_flag"):
+                if key in data and data[key] is None:
+                    data[key] = s[key]
+            try:
+                return handler(data)
+            except ValidationError:
+                pass
+        obj = cls.model_construct(index=data["index"], name=s["name"], sets=s.get("sets"))
+        obj._keep_stored = True
+        return obj
 
     @model_validator(mode="after")
     def _index_or_new(self) -> "AmendExerciseModel":
@@ -337,7 +464,10 @@ class SessionAmendInput(BaseModel):
 
     @field_validator("date")
     @classmethod
-    def _plausible_date(cls, v: date) -> date:
+    def _plausible_date(cls, v: date, info) -> date:
+        stored = (info.context or {}).get("stored_date")
+        if stored is not None and v == stored:
+            return v  # restating the stored date unchanged is not re-checked (P58)
         return check_plausible_date(v)
 
     @field_validator("exercises")
@@ -384,7 +514,9 @@ class SessionChange(BaseModel):
 
     action: Literal["amended", "deleted", "restored"]
     session_id: UUID
-    audit_id: UUID                   # decision_log row holding the pre-change snapshot
+    audit_id: UUID | None            # decision_log row holding the pre-change snapshot
+    #                                  (None when an amend changed nothing: no entry is written)
+    changed: bool = True             # amend: False when the session would be stored byte-identically
     anomaly_flags: list[AnomalyFlag] = Field(default_factory=list)  # amend: as a fresh log
     # amend: every stored exercise the amend left out (its `index` was not
     # restated), so none disappears unreported; the full rows stay in the audit entry
@@ -435,8 +567,12 @@ class ExerciseDetail(BaseModel):
     load_type: str | None = None             # per_hand | per_side | total | machine_stack | bodyweight
     load_type_unknown: bool = True           # no load_type stored: tonnage counts it as read
     weight_as_entered: list[float | None] = Field(default_factory=list)  # the user's own numbers
-    unit_as_entered: str = "kg"              # their unit ('kg' for weight_kg callers)
-    entered_weight: list[float | None] | None = None  # stored weight+unit form, if used
+    # unit_as_entered: their unit ('kg' for weight_kg callers; falls back to kg for rows
+    # written before units were recorded); null when no weight was entered at all.
+    # weight_as_entered / unit_as_entered are this EFFECTIVE read-back; entered_weight /
+    # entered_unit below are the RAW stored weight + unit form (null on those older rows).
+    unit_as_entered: str | None = None
+    entered_weight: list[float | None] | None = None  # raw stored weight+unit form, if used
     entered_unit: str | None = None
     tempo: str | None = None
     form_quality: int | None = None

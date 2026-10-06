@@ -220,15 +220,37 @@ def _session_on(d):
 
 
 @pytest.mark.parametrize("bad", [date(2099, 1, 1), date(1, 1, 1), date(1999, 12, 31),
-                                 date(2026, 10, 8), date(9999, 12, 31)])
+                                 date(2026, 10, 7), date(2026, 10, 8), date(9999, 12, 31)])
 def test_implausible_session_dates_rejected(clock, bad):
     with pytest.raises(Exception, match="plausible"):
         _session_on(bad)
 
 
-@pytest.mark.parametrize("ok", [date(2000, 1, 1), date(2026, 10, 6), date(2026, 10, 7)])
-def test_plausible_session_dates_accepted_incl_one_day_slack(clock, ok):
+@pytest.mark.parametrize("ok", [date(2000, 1, 1), date(2026, 10, 5), date(2026, 10, 6)])
+def test_plausible_session_dates_accepted_up_to_today(clock, ok):
     assert _session_on(ok).date == ok
+
+
+def test_a_session_dated_tomorrow_is_rejected_on_every_write_and_read_path(clock):
+    """P69: the 1-day slack let a session dated tomorrow yield negative gaps and
+    sit outside every window that ends today. The app is local: no slack."""
+    from coach_tools import DISPATCH
+    tomorrow = "2026-10-07"
+    ex = [{"name": "Squat", "sets": 1}]
+    with pytest.raises(ValueError, match="plausible"):
+        DISPATCH["log_session"]({"date": tomorrow, "exercises": ex})
+    with pytest.raises(ValueError, match="plausible"):
+        DISPATCH["bodyweight_log"]({"date": tomorrow, "condition": "fed", "weight_kg": 80})
+    with pytest.raises(ValueError, match="plausible"):
+        DISPATCH["recovery"]({"date": tomorrow})
+    with pytest.raises(ValueError, match="plausible"):
+        DISPATCH["trend"]({"muscle": "quads", "end_date": tomorrow})
+    with pytest.raises(ValueError, match="plausible"):
+        DISPATCH["bodyweight_history"]({"end_date": tomorrow})
+    sid = DISPATCH["log_session"]({"date": "2026-10-06", "exercises": ex})["session_id"]
+    with pytest.raises(ValueError, match="plausible"):
+        DISPATCH["session_amend"]({"session_id": sid, "date": tomorrow,
+                                   "exercises": [{"new": True, "name": "Squat", "sets": 1}]})
 
 
 def test_far_future_session_is_rejected_at_the_tool_and_never_stored(clock):

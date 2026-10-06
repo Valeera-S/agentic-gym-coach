@@ -16,14 +16,17 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from models import MemoryNote, NoteKind
+from models.text import clean_ident_list, clean_text
 
 from .init import get_duckdb
 
 
 def add_note(text: str, kind: NoteKind = NoteKind.observation,
              tags: list[str] | None = None) -> MemoryNote:
+    clean_text(text, "note text")  # valid UTF-8; only newline, carriage return, tab as controls
     if not text.strip():
         raise ValueError("note text cannot be empty")
+    clean_ident_list(tags or [], "tag")
     row = get_duckdb().execute(
         """
         INSERT INTO memory_notes (created_at, kind, text, tags)
@@ -39,6 +42,8 @@ def add_note(text: str, kind: NoteKind = NoteKind.observation,
 def search_notes(query: str | None = None, tags: list[str] | None = None,
                  limit: int = 20) -> list[MemoryNote]:
     """Notes matching (substring query) AND (any of the given tags)."""
+    clean_text(query, "query")
+    clean_ident_list(tags or [], "tag")
     sql = "SELECT id, created_at, kind, text, tags FROM memory_notes"
     conds, params = [], []
     if query:

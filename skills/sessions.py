@@ -45,6 +45,7 @@ from models import (
     SessionChange,
     SessionDetail,
     SessionInput,
+    SessionKind,
     WeightUnit,
 )
 from models.exercise_catalog import classify, default_load_type, lookup_key, resolve_name
@@ -117,6 +118,7 @@ def _exercise(e: dict | None, index: int | None = None) -> ExerciseDetail:
     unit = e.get("entered_unit")
     sets = e.get("sets")
     weights = _per_set(e.get("weight_kg"), sets)
+    as_entered = list(e["entered_weight"]) if unit else weights
     return ExerciseDetail(
         index=index,
         name=e.get("name"),
@@ -133,8 +135,9 @@ def _exercise(e: dict | None, index: int | None = None) -> ExerciseDetail:
         load_type_unknown=e.get("load_type") is None,
         # what the user entered: the weight+unit form if they used it, else
         # the kg numbers they sent as weight_kg
-        weight_as_entered=list(e["entered_weight"]) if unit else weights,
-        unit_as_entered=unit or "kg",
+        weight_as_entered=as_entered,
+        # no weight entered (bodyweight / unrecorded sets) means no unit either (P61)
+        unit_as_entered=(unit or "kg") if any(w is not None for w in as_entered) else None,
         entered_weight=list(e["entered_weight"]) if e.get("entered_weight") is not None else None,
         entered_unit=unit,
         tempo=e.get("tempo"),
@@ -222,7 +225,7 @@ def get_session_detail(session_id: str | UUID | None = None,
     if (session_id is None) == (on_date is None):
         raise ValueError("give exactly one of session_id or date")
     if session_id is not None:
-        sid = session_id if isinstance(session_id, UUID) else UUID(str(session_id))
+        sid = _uuid(session_id)
         rows = get_duckdb().execute(
             f"SELECT {_COLS} FROM sessions WHERE id = ?", [sid]).fetchall()
         if not rows:
@@ -242,12 +245,19 @@ def get_session_detail(session_id: str | UUID | None = None,
 # rpe included), so the row can be put back from the audit entry alone
 # (restore_snapshot()). An unknown id is invalid_input; nothing is written.
 
-def _uuid(session_id) -> UUID:
-    if isinstance(session_id, UUID):
-        return session_id
-    if not isinstance(session_id, str):
-        raise ValueError("session_id must be a string UUID")
-    return UUID(session_id)
+def _uuid(value, what: str = "session_id") -> UUID:
+    """A session (or audit) id as a UUID; anything else is invalid_input with a
+    message that says what the id is and where it comes from (P63)."""
+    if isinstance(value, UUID):
+        return value
+    try:
+        if isinstance(value, str):
+            return UUID(value)
+    except ValueError:
+        pass
+    shown = repr(value) if len(repr(value)) <= 60 else repr(value)[:57] + "...'"
+    raise ValueError(f"{what} must be a UUID (as returned by coach_sessions / "
+                     f"coach_session_detail), got {shown}")
 
 
 def _snapshot(sid: UUID) -> dict | None:
@@ -440,6 +450,47 @@ def _not_carried_on_rename(ex, replaced: dict, restated_muscle: bool) -> list[An
     return flags
 
 
+def parse_amend_input(args: dict) -> SessionAmendInput:
+    """Validate a coach_session_amend argument dict against the stored session.
+
+    The stored session is handed to validation as context so an exercise
+    restated UNCHANGED (and the stored date restated as is) is not re-checked
+    against today's input rules: rows older code wrote can hold values the
+    rules reject, and the coach must still be able to fix another exercise of
+    that session (P58). Changed and new exercises are validated in full. An
+    unknown session id falls through to plain validation (amend_session then
+    reports it)."""
+    context = None
+    sid = args.get("session_id") if isinstance(args, dict) else None
+    if sid is not None:
+        snap = _snapshot(_uuid(sid))
+        if snap is not None:
+            context = {"stored_exercises": snap["exercises"] or [],
+                       "stored_date": date.fromisoformat(snap["date"])}
+    return SessionAmendInput.model_validate(args, context=context)
+
+
+def _stored_flags(e: dict | None, index: int) -> list[AnomalyFlag]:
+    """The anomaly flags of an exercise kept exactly as stored, derived from
+    the stored values like coach_session_detail does."""
+    e = e or {}
+    name = e.get("name") or f"exercise {index}"
+    flags: list[AnomalyFlag] = []
+    if _needs_review(e.get("name"), e.get("muscle_source")):
+        flags.append(AnomalyFlag(
+            code=AnomalyCode.needs_review,
+            detail=_review_text(e["name"], e.get("muscle_group"), e.get("muscle_source"))
+            if e.get("name") else f"exercise entry {index} has no name"))
+    if e.get("pain_flag"):
+        flags.append(AnomalyFlag(code=AnomalyCode.pain_flag, detail=f"{name}: pain during exercise"))
+    fq = e.get("form_quality")
+    if fq is not None and fq < 3:
+        flags.append(AnomalyFlag(
+            code=AnomalyCode.form_quality_low,
+            detail=f"{name}: form_quality={fq} (volume -50% downstream)"))
+    return flags
+
+
 def amend_session(data: SessionAmendInput) -> SessionChange:
     """Replace a session's date and exercises, keeping its id (and created_at).
 
@@ -454,16 +505,29 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
     if before is None:
         raise ValueError(f"no session with id {sid}")
     removed = _removed(before["exercises"], data.exercises)
-    keep, carry_flags = _provenance_to_keep(data.exercises, before["exercises"])
-    fresh = SessionInput(
-        date=data.date, exercises=data.exercises,
+    # exercises restated unchanged that today's input rules reject (legacy rows,
+    # P58) are kept exactly as stored; everything else is prepared as a fresh log
+    live = [ex for ex in data.exercises if not ex.keep_stored]
+    keep, carry_flags = _provenance_to_keep(live, before["exercises"])
+    # model_construct: kept stored values (a legacy date, post_feedback, ...) are
+    # not re-checked; every value the caller sent was validated at parse time
+    fresh = SessionInput.model_construct(
+        date=data.date, exercises=live,
         phase=data.phase or (PhaseType(before["phase"]) if before["phase"] else None),
-        kind=data.kind or before["kind"],
+        kind=SessionKind(data.kind or before["kind"]),
         pre_recovery_score=_amended(data, "pre_recovery_score", before),
         post_feedback=_amended(data, "post_feedback", before),
     )
-    phase, structs, flags = prepare_session(fresh, keep)
+    phase, prepared, flags = prepare_session(fresh, keep)
     flags = carry_flags + flags
+    prepared_iter = iter(prepared)
+    structs = []
+    for ex in data.exercises:
+        if ex.keep_stored:
+            structs.append(dict(before["exercises"][ex.index]))
+            flags = flags + _stored_flags(before["exercises"][ex.index], ex.index)
+        else:
+            structs.append(next(prepared_iter))
 
     def work():
         get_duckdb().execute(
@@ -472,11 +536,21 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
                WHERE id = ?""",
             [fresh.date, phase.value, fresh.kind.value, fresh.pre_recovery_score,
              fresh.post_feedback, structs, sid])
+        after = _snapshot(sid)
+        if after == before:
+            return None  # stored byte-identically: nothing to audit (P64a)
         return _audit(DecisionEventType.session_amend, sid, before,
                       f"amended: {len(before['exercises'] or [])} -> {len(structs)} exercise(s)",
-                      after=_snapshot(sid))
+                      after=after)
 
     audit_id = _in_transaction(work)
+    if audit_id is None:
+        return SessionChange(action="amended", session_id=sid, audit_id=None, changed=False,
+                             anomaly_flags=flags, phase=phase.value, kind=fresh.kind.value,
+                             pre_recovery_score=fresh.pre_recovery_score,
+                             post_feedback=fresh.post_feedback,
+                             message="nothing changed: the session is stored as it was "
+                                     "(no audit entry written)")
     message = "session amended; previous version audited"
     if removed:
         message += (f"; removed {len(removed)} stored exercise(s) not restated "
@@ -531,7 +605,7 @@ def restore_snapshot(audit_id) -> SessionChange:
     `after`, and `restored_from`. Restoring that entry puts the overwritten
     state back — or, when nothing existed, deletes the session again.
     """
-    aid = _uuid(audit_id)
+    aid = _uuid(audit_id, "audit_id")
     row = get_duckdb().execute(
         "SELECT event_type, payload FROM decision_log WHERE id = ?", [aid]).fetchone()
     if row is None or row[1] is None or row[0] not in {e.value for e in _PAST}:

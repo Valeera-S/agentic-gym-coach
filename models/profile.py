@@ -14,9 +14,11 @@ from datetime import date, datetime
 from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictBool, StrictInt, field_validator
 
 from .enums import MuscleGroup
+from .session import StrictNum
+from .text import clean_ident, clean_ident_list, clean_text, is_stored_read
 
 
 class GoalKind(str, Enum):
@@ -93,6 +95,12 @@ class AvailabilityWindow(BaseModel):
     end: str | None = None
     venue: str | None = None
 
+    @field_validator("venue")
+    @classmethod
+    def _clean_venue(cls, v: str | None, info) -> str | None:
+        # a short single-line string; what is already stored is read as is (P66)
+        return v if v is None or is_stored_read(info) else clean_ident(v, "venue")
+
     @field_validator("start", "end")
     @classmethod
     def _normalize_time(cls, v: str | None) -> str | None:
@@ -146,16 +154,22 @@ class Goal(BaseModel):
     def _real_muscles_only(cls, v: list[MuscleGroup]) -> list[MuscleGroup]:
         return _no_sentinel(v)
 
+    @field_validator("metric", "notes")
+    @classmethod
+    def _clean_free_text(cls, v: str | None, info) -> str | None:
+        # free text: newline, carriage return, tab allowed; no surrogate (P66)
+        return v if v is None or is_stored_read(info) else clean_text(v, info.field_name)
+
 
 class UserProfile(BaseModel):
     display_name: str | None = None
     goals: list[Goal] = Field(default_factory=list)
     training_age: TrainingAge | None = None
-    days_per_week: int | None = Field(default=None, ge=1, le=7)
+    days_per_week: StrictInt | None = Field(default=None, ge=1, le=7)
     # When those days can happen — best-effort windows, formatted by the coach
     # from whatever the user says ("Fri after 7, school gym closes at 8").
     weekly_availability: list[AvailabilityWindow] = Field(default_factory=list)
-    session_length_min: int | None = Field(default=None, ge=15, le=240)
+    session_length_min: StrictInt | None = Field(default=None, ge=15, le=240)
     # None until the user answers — never assume full_gym (the intake scan
     # must report it missing, not launder the default into a collected value).
     equipment_access: EquipmentAccess | None = None
@@ -166,9 +180,9 @@ class UserProfile(BaseModel):
     # sex-, age-, and bodyfat-dependent). bodyweight_kg is the onboarding snapshot;
     # the tracked series lives in bodyweight_log (snapshot body_weight_kg = 7-day fasted mean).
     sex: Sex | None = None
-    age_years: int | None = Field(default=None, ge=14, le=100)
-    bodyweight_kg: float | None = Field(default=None, gt=0, le=400)
-    bodyfat_pct: float | None = Field(default=None, gt=0, le=70)
+    age_years: StrictInt | None = Field(default=None, ge=14, le=100)
+    bodyweight_kg: StrictNum | None = Field(default=None, gt=0, le=400)
+    bodyfat_pct: StrictNum | None = Field(default=None, gt=0, le=70)
     activity_level: ActivityLevel | None = None
     # Training-side lifestyle & history — standardized-intake x-factors.
     # life_stress: Training ch02 (one cumulative stress bucket with training).
@@ -181,8 +195,8 @@ class UserProfile(BaseModel):
     # has_tested_maxes: Training ch08/ch09 ("no tested 1RM → RPE alone").
     life_stress: StressLevel | None = None
     concurrent_sports: list[str] | None = None
-    rpe_calibrated: bool | None = None
-    has_tested_maxes: bool | None = None
+    rpe_calibrated: StrictBool | None = None
+    has_tested_maxes: StrictBool | None = None
     # Nutrition-side lifestyle & history — standardized-intake x-factors.
     # diet_phase_duration_weeks: Nutrition ch05 (≥3 months dieting → diet breaks).
     # tracking_tier: Nutrition ch07 (tier drops are planned events — need the start point).
@@ -191,24 +205,41 @@ class UserProfile(BaseModel):
     #   caffeine dosing is tolerance-dependent) — freeform, e.g. "2 coffees/day".
     # (meals_per_day and social_support were omitted from the intake — see
     #  docs/adr/0002-omitted-and-derived-intake-fields.md.)
-    diet_phase_duration_weeks: int | None = Field(default=None, ge=0, le=520)
+    diet_phase_duration_weeks: StrictInt | None = Field(default=None, ge=0, le=520)
     tracking_tier: TrackingTier | None = None
-    eating_out_per_week: int | None = Field(default=None, ge=0, le=21)
-    alcohol_per_week: int | None = Field(default=None, ge=0, le=100)
+    eating_out_per_week: StrictInt | None = Field(default=None, ge=0, le=21)
+    alcohol_per_week: StrictInt | None = Field(default=None, ge=0, le=100)
     supplement_notes: str | None = None
     caffeine_intake: str | None = None
     # Nutrition ch03 insulin-resistance macro-branch gates (age, family diabetes
     # history, PCOS, oligomenorrhea). Ask when relevant to a nutrition plan,
     # phrased sensitively; never guess a value.
-    family_diabetes_history: bool | None = None
-    pcos: bool | None = None
-    oligomenorrhea: bool | None = None
+    family_diabetes_history: StrictBool | None = None
+    pcos: StrictBool | None = None
+    oligomenorrhea: StrictBool | None = None
     updated_at: datetime | None = None
 
     @field_validator("priority_muscles")
     @classmethod
     def _real_priorities_only(cls, v: list[MuscleGroup]) -> list[MuscleGroup]:
         return _no_sentinel(v)
+
+    @field_validator("display_name")
+    @classmethod
+    def _clean_short(cls, v: str | None, info) -> str | None:
+        return v if v is None or is_stored_read(info) else clean_ident(v, info.field_name)
+
+    @field_validator("liked_exercises", "disliked_exercises", "concurrent_sports")
+    @classmethod
+    def _clean_short_list(cls, v: list[str] | None, info) -> list[str] | None:
+        if v is None or is_stored_read(info):
+            return v
+        return clean_ident_list(v, info.field_name, allow_blank=False)
+
+    @field_validator("supplement_notes", "caffeine_intake")
+    @classmethod
+    def _clean_free_text(cls, v: str | None, info) -> str | None:
+        return v if v is None or is_stored_read(info) else clean_text(v, info.field_name)
 
 
 class MemoryNote(BaseModel):

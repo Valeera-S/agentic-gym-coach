@@ -149,7 +149,9 @@ def error_payload(e: Exception) -> dict:
         code = "db"
     else:
         code = "internal"
-    return {"error": code, "exception": type(e).__name__, "detail": str(e)}
+    # an echoed input may hold a lone surrogate, which no client can encode: escape it
+    detail = str(e).encode("utf-8", "backslashreplace").decode("utf-8")
+    return {"error": code, "exception": type(e).__name__, "detail": detail}
 
 
 @_accepts(model="SessionInput")
@@ -174,7 +176,8 @@ def cmd_safety_check(args: dict):
 @_accepts("date")
 def cmd_recovery(args: dict):
     from skills.recovery import compute_recovery_score
-    d = _parse_date(args.get("date")) or date.today()
+    from models.dates import today
+    d = _parse_date(args.get("date")) or today()
     return compute_recovery_score(d).model_dump(mode="json")
 
 
@@ -223,9 +226,8 @@ def cmd_session_detail(args: dict):
 
 @_accepts(model="SessionAmendInput")
 def cmd_session_amend(args: dict):
-    from models import SessionAmendInput
-    from skills.sessions import amend_session
-    data = SessionAmendInput.model_validate(args)  # rejected before any write
+    from skills.sessions import amend_session, parse_amend_input
+    data = parse_amend_input(args)  # rejected before any write
     return amend_session(data).model_dump(mode="json")
 
 
@@ -285,11 +287,16 @@ def cmd_profile_get(args: dict):
     return p.model_dump(mode="json") if p else {"profile": None}
 
 
+def _field_default(model, key: str):
+    """What an explicit null clears a model field to: its default ([] for a list)."""
+    return model.model_fields[key].get_default(call_default_factory=True)
+
+
 @_accepts(model="UserProfile")
 def cmd_profile_set(args: dict):
     from models import UserProfile
     from models import AvailabilityWindow, Goal
-    from skills.profile import set_profile
+    from skills.profile import merge_profile
     # `updated_at` is what coach_profile_get returns but the server owns it:
     # accepted and ignored, so a get -> edit -> set round trip keeps working.
     args = {k: v for k, v in args.items() if k != "updated_at"}
@@ -299,13 +306,14 @@ def cmd_profile_set(args: dict):
             for i, item in enumerate(items):
                 if isinstance(item, dict):
                     _check_keys(item, set(model.model_fields), f"{key}[{i}]")
-    profile = UserProfile.model_validate(args)
-    if profile == UserProfile():
-        # An all-default profile would silently disarm the intake's empty-profile
-        # signal (adversarial F3): refuse instead of writing it.
+    if not args:
         raise ValueError("profile is empty — provide at least one field "
                          "(goals, training_age, days_per_week, bodyweight_kg, ...)")
-    return set_profile(profile).model_dump(mode="json")
+    # MERGE (P71): keys present overwrite, keys absent keep the stored value, an
+    # explicit null clears that field (a list field to [], any other to None).
+    cleaned = {k: _field_default(UserProfile, k) if v is None else v for k, v in args.items()}
+    incoming = UserProfile.model_validate(cleaned)  # strict, before any write
+    return merge_profile(incoming, set(args)).model_dump(mode="json")
 
 
 @_accepts("text", "kind", "tags")

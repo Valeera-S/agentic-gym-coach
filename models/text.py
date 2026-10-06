@@ -1,7 +1,9 @@
 """Input-boundary checks for free text (P39, P40).
 
-Applies to what a caller sends: exercise names, notes, tempo, post_feedback and
-the bodyweight scale / notes. Readers keep tolerating whatever is already stored.
+Applies to what a caller sends: exercise names, notes, tempo, post_feedback, the
+bodyweight scale / notes, injury ban names, memory text / tags / queries, profile
+strings and the safety_check name (P66). Readers keep tolerating whatever is
+already stored.
 """
 
 from __future__ import annotations
@@ -43,3 +45,26 @@ def clean_name(v: str) -> str:
     if not v.strip():
         raise ValueError("exercise name must not be blank")
     return v
+
+
+def clean_ident(v: str, what: str) -> str:
+    """A short single-line identifier (a tag, a ban or alternative name, a profile
+    short string): valid UTF-8 and no control character at all (P66). Blankness
+    is the caller's rule."""
+    clean_text(v, what, allowed=())
+    return v
+
+
+def clean_ident_list(values: list[str], what: str, *, allow_blank: bool = True) -> list[str]:
+    """clean_ident on every item; `allow_blank=False` also rejects a blank item (P67)."""
+    for item in values:
+        clean_ident(item, what)
+        if not allow_blank and not item.strip():
+            raise ValueError(f"{what} must not contain a blank item")
+    return values
+
+
+def is_stored_read(info) -> bool:
+    """True when a model is being rebuilt from what is already stored
+    (`context={"stored": True}`): readers keep tolerating old values."""
+    return bool(info is not None and info.context and info.context.get("stored"))

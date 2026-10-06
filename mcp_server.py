@@ -22,10 +22,20 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from mcp.server.mcpserver import MCPServer  # noqa: E402  (mcp 2.x: FastMCP → MCPServer)
+from pydantic import Strict, StrictInt  # noqa: E402
+from typing import Annotated  # noqa: E402
 
 import coach_tools  # noqa: E402
 
 mcp = MCPServer(name="gym-coach")
+
+# The framework coerces arguments per the wrapper's type hints BEFORE the shared
+# handler's own checks run: with plain `int` / `float`, `true` became 1 and "28" /
+# 28.0 became 28 over MCP while the CLI rejected them (P68). Strict types make the
+# MCP layer reject what the CLI rejects (the JSON schema stays integer / number; a
+# whole number is still fine for a decimal field). Such a type error surfaces as a
+# framework tool error, not the {"error": ...} dict.
+StrictNum = Annotated[float, Strict()]
 
 # Bounded chapter delivery — routers stay light, content arrives on demand.
 _MAX_DOCTRINE_CHARS = 14_000
@@ -75,7 +85,7 @@ def _run(cmd: str, args: dict) -> dict:
 @mcp.tool()
 def coach_log_session(date: str, exercises: list[dict], phase: str | None = None,
                       post_feedback: str | None = None,
-                      pre_recovery_score: int | None = None,
+                      pre_recovery_score: StrictInt | None = None,
                       kind: str = coach_tools.DEFAULT_SESSION_KIND) -> dict:
     """Persist a session (validated, canonicalized, anomaly-flagged).
 
@@ -111,7 +121,7 @@ def coach_recovery(date: str | None = None) -> dict:
 
 @mcp.tool()
 def coach_trend(muscle: str,
-                window_days: int = coach_tools.DEFAULT_TREND_WINDOW_DAYS,
+                window_days: StrictInt = coach_tools.DEFAULT_TREND_WINDOW_DAYS,
                 end_date: str | None = None) -> dict:
     """Effective hard sets, avg RPE, est 1RM (≤6-rep sets), trend direction (judged per exercise identity, counting only exercises for which the muscle is a chart primary: identities with heavy (<=6-rep) sets in both window halves vote on est-1RM, otherwise direction falls to each exercise's own performance: more load at >= the same reps, more reps at the same load, or a load step whose heavier sets all stay >= 6 reps without a lower Epley estimate — HEURISTIC, never reported; bodyweight exercises compare by dominance only; unlogged weights are unknown, never 0; detail.direction_basis and detail.identity_directions show which basis and which exercises decided), and stall flag for a muscle group over a window (detail block: tonnage = total external load, x2 for per_hand/per_side readings; load_type_unknown_sets; unloaded/overlap sets)."""
     return _run("trend", {"muscle": muscle, "window_days": window_days, "end_date": end_date})
@@ -130,7 +140,7 @@ def coach_intake_status() -> dict:
 
 
 @mcp.tool()
-def coach_sessions(limit: int = coach_tools.DEFAULT_SESSIONS_LIMIT) -> dict:
+def coach_sessions(limit: StrictInt = coach_tools.DEFAULT_SESSIONS_LIMIT) -> dict:
     """List recent sessions as {sessions, count} (each: id, date, phase, pre_recovery_score, post_feedback, kind, needs_review = number of exercises still needing review). Lean by design — use coach_session_detail for the exercises."""
     return _run("sessions", {"limit": limit})
 
@@ -141,7 +151,10 @@ def coach_session_detail(session_id: str | None = None, date: str | None = None)
 
     Returns {sessions: [...]}: every exercise with its `index` (the handle coach_session_amend takes),
     its identity and raw_name as typed, sets/reps/rpe,
-    weight_kg plus the user's own numbers (weight_as_entered + unit_as_entered), load_type
+    weight_kg plus the user's own numbers (weight_as_entered + unit_as_entered: the effective read-back,
+    which falls back to kg for rows written before units were recorded; unit_as_entered is null when no
+    weight was entered, e.g. bodyweight sets; entered_weight + entered_unit are the raw stored
+    weight + unit form, null on those older rows), load_type
     (load_type_unknown when not recorded), muscle_group + muscle_source, and needs_review with the reason.
     Every stored entry is listed: a nameless one (older rows) has name null and needs_review.
     Unknown id or date -> invalid_input.
@@ -153,7 +166,7 @@ def coach_session_detail(session_id: str | None = None, date: str | None = None)
 def coach_session_amend(session_id: str, date: str, exercises: list[dict],
                         phase: str | None = None, kind: str | None = None,
                         post_feedback: str | None = None,
-                        pre_recovery_score: int | None = None,
+                        pre_recovery_score: StrictInt | None = None,
                         clear: list[str] | None = None) -> dict:
     """Replace a logged session's date and exercises (same id). ONLY after showing the user the
     current entry (coach_session_detail) and the correction, and getting their explicit yes.
@@ -169,13 +182,18 @@ def coach_session_amend(session_id: str, date: str, exercises: list[dict],
     `removed_exercises` (index, name, ...; nameless older entries included). Read-back-only keys (raw_name, muscle_source,
     entered_weight, ...) -> invalid_input. An exercise restated unchanged keeps what was recorded
     (raw name, weight + unit, load_type, muscle provenance; an older entry whose name the catalog
-    now maps to another identity is canonicalized, with that name kept as its raw_name). Omit
+    now maps to another identity is canonicalized, with that name kept as its raw_name). Legacy
+    values today's input rules reject stay as stored when that exercise is restated unchanged (so
+    another exercise of the session can be fixed); a changed or new exercise is validated in full.
+    An explicit null for reps/rpe/weight_kg = not recorded; for form_quality/pain_flag = the default
+    (on an unchanged restatement: keep what is stored). Omit
     muscle_group to re-derive it (fixes an old guess); confirm_muscle=true records it as the user's;
     on a rename (same index, different exercise) a muscle_group equal to the old exercise's (even
     one the user had set; confirm_muscle=true keeps it, a different muscle_group is your own
     choice), or any load_type copied from it, is not applied (flagged amend_not_applied where
     that changes the result).
-    Returns the session-level values now stored.
+    Returns the session-level values now stored, and `changed`: false (audit_id null, no audit
+    entry) when the session is stored exactly as before.
     The complete previous version is written to the audit trail. Unknown id -> invalid_input.
     """
     return _run("session_amend", {"session_id": session_id, "date": date, "exercises": exercises,
@@ -192,8 +210,8 @@ def coach_session_delete(session_id: str) -> dict:
 
 
 @mcp.tool()
-def coach_bodyweight_log(date: str, condition: str, weight: float | None = None,
-                         unit: str | None = None, weight_kg: float | None = None,
+def coach_bodyweight_log(date: str, condition: str, weight: StrictNum | None = None,
+                         unit: str | None = None, weight_kg: StrictNum | None = None,
                          scale: str | None = None, notes: str | None = None) -> dict:
     """Record one bodyweight reading (several per date are fine). `condition` is REQUIRED:
     morning_fasted | fed | post_workout | unknown (unknown only when the user truly doesn't know).
@@ -205,7 +223,7 @@ def coach_bodyweight_log(date: str, condition: str, weight: float | None = None,
 
 
 @mcp.tool()
-def coach_bodyweight_history(window_days: int = coach_tools.DEFAULT_BODYWEIGHT_WINDOW_DAYS,
+def coach_bodyweight_history(window_days: StrictInt = coach_tools.DEFAULT_BODYWEIGHT_WINDOW_DAYS,
                              end_date: str | None = None) -> dict:
     """Bodyweight readings over a window (window_days calendar days ending at end_date inclusive, default today)
     plus, PER CONDITION, the mean, the reading count (`readings`) and the number of distinct days behind it (`days`; the mean is of daily values) for the last 7 days and for the whole window.
@@ -220,7 +238,7 @@ def coach_injuries_list() -> dict:
 
 
 @mcp.tool()
-def coach_injuries_seed(location: str, status: str, severity: int,
+def coach_injuries_seed(location: str, status: str, severity: StrictInt,
                         contraindicated_exercises: list[str] | None = None,
                         safe_alternatives: list[str] | None = None) -> dict:
     """Insert an injury record. Only when the user explicitly reports a new injury or state change.
@@ -241,7 +259,7 @@ def coach_profile_get() -> dict:
 
 @mcp.tool()
 def coach_profile_set(profile: dict) -> dict:
-    """Create/update the user profile (validated, versioned; goal changes audited). Echo it to the user after setting. An all-empty profile is refused. An unknown field (also inside goals / weekly_availability) is invalid_input, never dropped; `updated_at` from coach_profile_get is accepted and ignored."""
+    """Create or MERGE-update the user profile (validated, versioned; goal changes audited). Send only the fields to change: a key present overwrites that field, a key absent keeps its stored value, an explicit null clears that field (null clears a list field to []); `goals`, when present, replaces the whole goal list. The first call creates the profile. Echo the result to the user after setting. A result with every field empty is refused. An unknown field (also inside goals / weekly_availability) is invalid_input, never dropped; `updated_at` from coach_profile_get is accepted and ignored, so a get then set round trip works."""
     return _run("profile_set", profile)
 
 
@@ -255,7 +273,7 @@ def coach_memory_save(text: str,
 
 @mcp.tool()
 def coach_memory_search(query: str | None = None, tags: list[str] | None = None,
-                        limit: int = coach_tools.DEFAULT_SEARCH_LIMIT) -> dict:
+                        limit: StrictInt = coach_tools.DEFAULT_SEARCH_LIMIT) -> dict:
     """Search long-term memory notes (substring AND any-tag, newest first); returns {notes, count}."""
     return _run("memory_search", {"query": query, "tags": tags, "limit": limit})
 
