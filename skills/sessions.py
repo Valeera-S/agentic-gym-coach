@@ -54,7 +54,8 @@ from models.session import _same_loads
 from .init import get_duckdb
 from .session_logger import prepare_session, review_detail
 
-_COLS = "id, date, phase, kind, pre_recovery_score, post_feedback, created_at, exercises"
+_COLS = ("id, date, phase, kind, pre_recovery_score, post_feedback, created_at, exercises, "
+         "label")
 
 
 def _f32(x: float | None) -> float | None:
@@ -183,7 +184,8 @@ def list_sessions(limit: int) -> list[dict]:
     """
     d = get_duckdb()
     rows = d.execute(
-        "SELECT rowid, CAST(id AS VARCHAR), date, phase, pre_recovery_score, post_feedback, kind "
+        "SELECT rowid, CAST(id AS VARCHAR), date, phase, pre_recovery_score, post_feedback, kind, "
+        "label "
         "FROM sessions "
         f"ORDER BY {_ORDER} LIMIT ?", [limit]).fetchall()
     if not rows:
@@ -204,16 +206,16 @@ def list_sessions(limit: int) -> list[dict]:
         if _needs_review(name, source):
             for rid in rids:
                 counts[position[rid]] += 1
-    cols = ["id", "date", "phase", "pre_recovery_score", "post_feedback", "kind"]
+    cols = ["id", "date", "phase", "pre_recovery_score", "post_feedback", "kind", "label"]
     return [{**dict(zip(cols, r[1:])), "needs_review": n} for r, n in zip(rows, counts)]
 
 
 def _row_to_detail(row: tuple) -> SessionDetail:
-    sid, d, phase, kind, score, feedback, created, exercises = row
+    sid, d, phase, kind, score, feedback, created, exercises, label = row
     exs = [_exercise(e, i) for i, e in enumerate(exercises or [])]
     return SessionDetail(
         id=sid, date=d, phase=phase, kind=kind, pre_recovery_score=score,
-        post_feedback=feedback, created_at=created, exercises=exs,
+        post_feedback=feedback, label=label, created_at=created, exercises=exs,
         needs_review_count=sum(1 for e in exs if e.needs_review),
     )
 
@@ -265,10 +267,10 @@ def _snapshot(sid: UUID) -> dict | None:
     row = get_duckdb().execute(f"SELECT {_COLS} FROM sessions WHERE id = ?", [sid]).fetchone()
     if row is None:
         return None
-    sid_, d, phase, kind, score, feedback, created, exercises = row
+    sid_, d, phase, kind, score, feedback, created, exercises, label = row
     return {
         "id": str(sid_), "date": d.isoformat(), "phase": phase, "kind": kind,
-        "pre_recovery_score": score, "post_feedback": feedback,
+        "pre_recovery_score": score, "post_feedback": feedback, "label": label,
         "created_at": created.isoformat() if created is not None else None,
         "exercises": exercises,
     }
@@ -497,8 +499,8 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
     The new content goes through prepare_session(), like a fresh log,
     except that an exercise restating a stored one keeps its stored
     provenance (_provenance_to_keep). Fields left out or null (phase, kind,
-    pre_recovery_score, post_feedback) keep their stored values; `clear`
-    removes post_feedback / pre_recovery_score explicitly.
+    pre_recovery_score, post_feedback, label) keep their stored values; `clear`
+    removes post_feedback / pre_recovery_score / label explicitly.
     """
     sid = data.session_id
     before = _snapshot(sid)
@@ -517,6 +519,7 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
         kind=SessionKind(data.kind or before["kind"]),
         pre_recovery_score=_amended(data, "pre_recovery_score", before),
         post_feedback=_amended(data, "post_feedback", before),
+        label=_amended(data, "label", before),
     )
     phase, prepared, flags = prepare_session(fresh, keep)
     flags = carry_flags + flags
@@ -532,10 +535,10 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
     def work():
         get_duckdb().execute(
             """UPDATE sessions SET date = ?, phase = ?, kind = ?, pre_recovery_score = ?,
-                                   post_feedback = ?, exercises = ?
+                                   post_feedback = ?, exercises = ?, label = ?
                WHERE id = ?""",
             [fresh.date, phase.value, fresh.kind.value, fresh.pre_recovery_score,
-             fresh.post_feedback, structs, sid])
+             fresh.post_feedback, structs, fresh.label, sid])
         after = _snapshot(sid)
         if after == before:
             return None  # stored byte-identically: nothing to audit (P64a)
@@ -548,7 +551,7 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
         return SessionChange(action="amended", session_id=sid, audit_id=None, changed=False,
                              anomaly_flags=flags, phase=phase.value, kind=fresh.kind.value,
                              pre_recovery_score=fresh.pre_recovery_score,
-                             post_feedback=fresh.post_feedback,
+                             post_feedback=fresh.post_feedback, label=fresh.label,
                              message="nothing changed: the session is stored as it was "
                                      "(no audit entry written)")
     message = "session amended; previous version audited"
@@ -559,7 +562,8 @@ def amend_session(data: SessionAmendInput) -> SessionChange:
                          anomaly_flags=flags, removed_exercises=removed,
                          phase=phase.value, kind=fresh.kind.value,
                          pre_recovery_score=fresh.pre_recovery_score,
-                         post_feedback=fresh.post_feedback, message=message)
+                         post_feedback=fresh.post_feedback, label=fresh.label,
+                         message=message)
 
 
 def _removed(stored: list | None, exercises: list) -> list[RemovedExercise]:
@@ -621,11 +625,11 @@ def restore_snapshot(audit_id) -> SessionChange:
         if before is not None:
             d.execute(
                 """INSERT INTO sessions (id, date, phase, kind, pre_recovery_score, post_feedback,
-                                         created_at, exercises)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                                         created_at, exercises, label)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [sid, before["date"], before["phase"], before["kind"],
                  before["pre_recovery_score"], before["post_feedback"], before["created_at"],
-                 before["exercises"]])
+                 before["exercises"], before.get("label")])
         if before is None:
             note = "restored: session removed (the entry recorded none)"
         elif overwritten is None:

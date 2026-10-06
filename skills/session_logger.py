@@ -164,12 +164,13 @@ def log_session(data: SessionInput) -> LogConfirmation:
     phase, structs, flags = prepare_session(data)
     row = get_duckdb().execute(
         """
-        INSERT INTO sessions (date, phase, pre_recovery_score, exercises, post_feedback, kind)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO sessions (date, phase, pre_recovery_score, exercises, post_feedback, kind,
+                              label)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         RETURNING id, date
         """,
         [data.date, phase.value, data.pre_recovery_score, structs, data.post_feedback,
-         data.kind.value],
+         data.kind.value, data.label],
     ).fetchone()
 
     session_id, session_date = row[0], row[1]

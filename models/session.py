@@ -14,7 +14,7 @@ from pydantic import (BaseModel, ConfigDict, Field, PrivateAttr, Strict, StrictB
                       ValidationError, field_validator, model_validator)
 
 from .dates import check_plausible_date
-from .text import clean_name, clean_text
+from .text import clean_label, clean_name, clean_text
 from .enums import AnomalyCode, LoadType, MuscleGroup, PhaseType, SessionKind, WeightUnit
 
 # A JSON number only: a bool (`true` read as 1.0) or a numeric string ("80")
@@ -228,6 +228,12 @@ class SessionInput(BaseModel):
     exercises: list[ExerciseModel]
     post_feedback: str | None = None
     kind: SessionKind = SessionKind.training
+    label: str | None = None
+
+    @field_validator("label")
+    @classmethod
+    def _clean_label(cls, v: str | None) -> str | None:
+        return clean_label(v)
 
     @field_validator("date")
     @classmethod
@@ -444,7 +450,7 @@ class SessionAmendInput(BaseModel):
     field is optional and, when omitted OR null, KEEPS its stored value —
     correcting a session's exercises must never silently clear the user's
     feedback or recovery score, or turn a habit into training. Removing a
-    stored post_feedback / pre_recovery_score is an explicit act: name it in
+    stored post_feedback / pre_recovery_score / label is an explicit act: name it in
     `clear` (it may not also be given a value).
 
     Exercises are AmendExerciseModel (input fields only). An exercise that
@@ -460,7 +466,14 @@ class SessionAmendInput(BaseModel):
     kind: SessionKind | None = None
     pre_recovery_score: StrictInt | None = Field(default=None, ge=0, le=100)
     post_feedback: str | None = None
-    clear: list[Literal["post_feedback", "pre_recovery_score"]] = Field(default_factory=list)
+    label: str | None = None
+    clear: list[Literal["post_feedback", "pre_recovery_score", "label"]] = Field(
+        default_factory=list)
+
+    @field_validator("label")
+    @classmethod
+    def _clean_label(cls, v: str | None) -> str | None:
+        return clean_label(v)
 
     @field_validator("date")
     @classmethod
@@ -527,6 +540,7 @@ class SessionChange(BaseModel):
     kind: str | None = None
     pre_recovery_score: int | None = None
     post_feedback: str | None = None
+    label: str | None = None
     message: str = ""
 
 
@@ -589,6 +603,7 @@ class SessionDetail(BaseModel):
     kind: str = "training"
     pre_recovery_score: int | None = None
     post_feedback: str | None = None
+    label: str | None = None
     created_at: datetime | None = None
     exercises: list[ExerciseDetail] = Field(default_factory=list)
     needs_review_count: int = 0

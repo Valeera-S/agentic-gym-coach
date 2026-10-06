@@ -47,6 +47,23 @@ def clean_name(v: str) -> str:
     return v
 
 
+MAX_LABEL_LEN = 40
+
+
+def clean_label(v: str | None) -> str | None:
+    """A session label ("back day"): optional; when given, single-line, not
+    blank, at most MAX_LABEL_LEN characters. Stored exactly as entered —
+    matching normalizes through exercise_catalog.lookup_key."""
+    if v is None:
+        return v
+    if len(v) > MAX_LABEL_LEN:
+        raise ValueError(f"label is too long ({len(v)} characters; at most {MAX_LABEL_LEN})")
+    clean_text(v, "label", allowed=())
+    if not v.strip():
+        raise ValueError("label must not be blank (leave it out instead)")
+    return v
+
+
 def clean_ident(v: str, what: str) -> str:
     """A short single-line identifier (a tag, a ban or alternative name, a profile
     short string): valid UTF-8 and no control character at all (P66). Blankness
