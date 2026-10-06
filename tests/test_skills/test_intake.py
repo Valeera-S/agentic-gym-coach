@@ -21,6 +21,7 @@ from models import (
     UserProfile,
     Weekday,
 )
+from conftest import log_empty_session
 from skills.injuries import seed_injury
 from skills.intake import assess_intake
 from skills.profile import set_profile
@@ -102,7 +103,7 @@ def test_empty_database_reports_everything_missing():
 def test_full_intake_is_ready_for_both_domains():
     set_profile(_full_profile())
     seed_injury("left_elbow", "resolving", 3)
-    log_session(SessionInput(date=TODAY - timedelta(days=1), exercises=[]))
+    log_empty_session(TODAY - timedelta(days=1))
     report = assess_intake(today=TODAY)
     assert report.missing == []
     assert report.training_ready is True

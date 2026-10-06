@@ -37,7 +37,7 @@ def _training(d: date) -> None:
 def test_default_kind_is_training():
     _training(D)
     assert get_duckdb().execute("SELECT kind FROM sessions").fetchone()[0] == "training"
-    assert SessionInput(date=D, exercises=[]).kind is SessionKind.training
+    assert SessionInput(date=D, exercises=[ExerciseModel(name="Squat", sets=1)]).kind is SessionKind.training
 
 
 def test_habit_sets_count_toward_volume():

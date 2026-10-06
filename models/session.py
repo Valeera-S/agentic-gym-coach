@@ -14,6 +14,7 @@ from pydantic import (BaseModel, ConfigDict, Field, Strict, StrictBool, StrictIn
                       field_validator, model_validator)
 
 from .dates import check_plausible_date
+from .text import clean_name, clean_text
 from .enums import AnomalyCode, LoadType, MuscleGroup, PhaseType, SessionKind, WeightUnit
 
 # A JSON number only: a bool (`true` read as 1.0) or a numeric string ("80")
@@ -75,6 +76,16 @@ class ExerciseModel(BaseModel):
     form_quality: StrictInt = Field(default=5, ge=1, le=5)
     pain_flag: bool = False
     notes: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _valid_name(cls, v: str) -> str:
+        return clean_name(v)
+
+    @field_validator("tempo", "notes")
+    @classmethod
+    def _clean_text_fields(cls, v: str | None, info) -> str | None:
+        return clean_text(v, info.field_name)
 
     @field_validator("reps", "rpe", "weight_kg")
     @classmethod
@@ -202,6 +213,18 @@ class SessionInput(BaseModel):
     def _plausible_date(cls, v: date) -> date:
         return check_plausible_date(v)
 
+    @field_validator("exercises")
+    @classmethod
+    def _at_least_one_exercise(cls, v: list[ExerciseModel]) -> list[ExerciseModel]:
+        if not v:
+            raise ValueError("a session needs at least one exercise")
+        return v
+
+    @field_validator("post_feedback")
+    @classmethod
+    def _clean_feedback(cls, v: str | None) -> str | None:
+        return clean_text(v, "post_feedback")
+
 
 class AnomalyFlag(BaseModel):
     """One anomaly raised during a log write."""
@@ -311,6 +334,21 @@ class SessionAmendInput(BaseModel):
     @classmethod
     def _plausible_date(cls, v: date) -> date:
         return check_plausible_date(v)
+
+    @field_validator("exercises")
+    @classmethod
+    def _amend_needs_exercises(cls, v: list[AmendExerciseModel]) -> list[AmendExerciseModel]:
+        if not v:
+            raise ValueError(
+                "exercises is empty: an amend replaces the session's exercises, so an empty "
+                "list would silently delete them all. To remove the session use "
+                "coach_session_delete; otherwise restate the exercises to keep")
+        return v
+
+    @field_validator("post_feedback")
+    @classmethod
+    def _clean_feedback(cls, v: str | None) -> str | None:
+        return clean_text(v, "post_feedback")
 
     @model_validator(mode="after")
     def _clear_or_set_not_both(self) -> "SessionAmendInput":

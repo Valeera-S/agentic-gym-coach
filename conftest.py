@@ -47,6 +47,18 @@ def _init_test_schema():
     shutil.rmtree(_RUN_DIR, ignore_errors=True)
 
 
+def log_empty_session(d, **kw):
+    """Store a session row with NO exercises, the way legacy rows exist.
+
+    Logging one is rejected at the input boundary (a session needs at least one
+    exercise, P39), but readers must keep tolerating stored empty rows, and
+    several tests need a zero-volume session. model_copy skips validation."""
+    from models import ExerciseModel, SessionInput
+    from skills.session_logger import log_session
+    inp = SessionInput(date=d, exercises=[ExerciseModel(name="Squat", sets=1)], **kw)
+    return log_session(inp.model_copy(update={"exercises": []}))
+
+
 @pytest.fixture(autouse=True)
 def _fixed_clock(monkeypatch):
     """The input-date plausibility window (models/dates.py, P38) reads "today"

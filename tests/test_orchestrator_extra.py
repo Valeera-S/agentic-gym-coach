@@ -8,12 +8,14 @@ from models import ExerciseModel, MuscleGroup, PhaseType, SessionInput
 from skills.init import get_duckdb
 from skills.session_logger import log_session
 
+from conftest import log_empty_session
+
 T = date(2030, 1, 10)
 
 
 def _log(d: date, phase=None):
     kw = {"phase": phase} if phase else {}
-    log_session(SessionInput(date=d, exercises=[], **kw))
+    log_empty_session(d, **kw)
 
 
 def test_working_memory_set_by_initialize_and_cleared():

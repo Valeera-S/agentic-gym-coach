@@ -221,8 +221,9 @@ def test_mcp_wrappers_match_the_cli():
     out = mcp_server.coach_session_amend(session_id=sid, date="2026-10-04",
                                          exercises=[{"new": True, "name": "Lat Pulldown", "sets": 3}])
     assert out["action"] == "amended"
-    assert mcp_server.coach_session_amend(session_id=sid, date="2026-10-04",
-                                          exercises=[])["action"] == "amended"
+    # an empty list is no longer a silent delete-everything (P39)
+    empty = mcp_server.coach_session_amend(session_id=sid, date="2026-10-04", exercises=[])
+    assert empty["error"] == "invalid_input" and "coach_session_delete" in empty["detail"]
     assert mcp_server.coach_session_delete(session_id=sid)["action"] == "deleted"
     assert mcp_server.coach_session_delete(session_id=sid)["error"] == "invalid_input"
 

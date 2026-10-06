@@ -129,7 +129,7 @@ def parse_log_md(text: str) -> list[SessionInput]:
 
     def flush_session():
         nonlocal cur_date, cur_blocks
-        if cur_date is not None:
+        if cur_date is not None and cur_blocks:  # a date with no exercises is no session (P39)
             sessions.append(SessionInput(date=cur_date, exercises=_build_exercises(cur_blocks)))
         cur_date = None
         cur_blocks = []

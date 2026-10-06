@@ -10,6 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .dates import check_plausible_date
+from .text import clean_text
 from .enums import WeightUnit
 from .session import LB_TO_KG, StrictNum
 
@@ -38,6 +39,11 @@ class BodyweightInput(BaseModel):
     weight_kg: StrictNum | None = None
     scale: str | None = None
     notes: str | None = None
+
+    @field_validator("scale", "notes")
+    @classmethod
+    def _clean_text_fields(cls, v: str | None, info) -> str | None:
+        return clean_text(v, info.field_name)
 
     @field_validator("date")
     @classmethod

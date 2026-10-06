@@ -13,10 +13,15 @@ from models import ExerciseModel, SessionInput
 from skills.recovery import compute_recovery_score
 from skills.session_logger import log_session
 
+from conftest import log_empty_session
+
 T = date(2030, 1, 10)  # target date
 
 
 def _session(d: date, exercises: list[ExerciseModel]) -> None:
+    if not exercises:
+        log_empty_session(d)  # a zero-volume session row (logging one is rejected on input)
+        return
     log_session(SessionInput(date=d, exercises=exercises))
 
 
