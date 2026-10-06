@@ -132,3 +132,47 @@ def test_kind_through_both_surfaces_and_listed_by_sessions():
                                         exercises=[{"name": "Lat Pulldown", "sets": 3}])
     listed = DISPATCH["sessions"]({})
     assert [s["kind"] for s in listed] == ["habit", "training"]
+
+
+def _pulldown(d: date, kg: float) -> None:
+    log_session(SessionInput(date=d, exercises=[ExerciseModel(
+        name="Lat Pulldown", sets=4, reps=[10] * 4, weight_kg=[kg] * 4)]))
+
+
+def test_habit_only_muscle_is_unknown_not_stalled_but_keeps_volume():
+    for days_ago in range(1, 6):
+        _squats(D - timedelta(days=days_ago), sets=3)
+    r = get_specialization_trend(MuscleGroup.quads, window_days=28, end_date=D)
+    assert r.effective_volume == pytest.approx(15.0)
+    assert r.trend_direction.value == "unknown"
+    assert r.stalled is False
+    assert r.sessions_in_window == 0
+
+
+def test_habit_dates_do_not_count_as_sessions_or_hide_progression():
+    for days_ago, kg in [(20, 22.7), (16, 22.7), (6, 27.2), (2, 27.2)]:
+        _pulldown(D - timedelta(days=days_ago), kg)
+    for days_ago in (18, 12, 10):  # habit pulldowns on other dates: not sessions
+        log_session(SessionInput(date=D - timedelta(days=days_ago), kind="habit", exercises=[
+            ExerciseModel(name="Lat Pulldown", sets=2, reps=[15] * 2, weight_kg=[20.0] * 2)]))
+    for days_ago in range(0, 14):
+        _squats(D - timedelta(days=days_ago))
+    lats = get_specialization_trend(MuscleGroup.lats, window_days=28, end_date=D)
+    assert lats.trend_direction.value == "up"
+    assert lats.sessions_in_window == 4
+    assert lats.stalled is False
+
+
+def test_direction_verdict_comes_from_training_sessions_only():
+    # training: constant load/reps -> plateau; habits on the same muscle alone
+    # would read as progression (reps climb in the later half)
+    for days_ago in (20, 16, 6, 2):
+        _pulldown(D - timedelta(days=days_ago), 27.2)
+    for days_ago, reps in [(19, 10), (18, 10), (5, 30), (4, 30)]:
+        log_session(SessionInput(date=D - timedelta(days=days_ago), kind="habit", exercises=[
+            ExerciseModel(name="Lat Pulldown", sets=3, reps=[reps] * 3, weight_kg=[27.2] * 3)]))
+    r = get_specialization_trend(MuscleGroup.lats, window_days=28, end_date=D)
+    assert r.trend_direction.value == "plateau"
+    assert r.sessions_in_window == 4
+    assert r.stalled is True
+    assert r.effective_volume == pytest.approx(4 * 4 + 4 * 3)  # habits still counted

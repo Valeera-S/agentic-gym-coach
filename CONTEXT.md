@@ -97,7 +97,8 @@ _Avoid_: other, core (the old silent default)
 
 **Habit session**:
 A session with `kind = habit`: a standing daily item done outside training
-(e.g. daily bodyweight squats). Counts toward volume; excluded from
+(e.g. daily bodyweight squats). Counts toward volume only; excluded from trend
+direction, `sessions_in_window` and the stall rule, and from
 recovery's training-load inputs, the session gap, deload block state and the
 phase fallback (pain flagged during it still counts toward recovery).
 _Avoid_: mini-session, active recovery

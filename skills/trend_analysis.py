@@ -52,6 +52,12 @@ change, never progression. `stalled` = plateau or down with >=4 sessions — a
 flag, not a verdict: the coach must run the plateau flowchart (free-wins →
 recovery checklist) before acting on it.
 
+Habit sessions (kind='habit', e.g. 60 bodyweight squats daily) count toward
+VOLUME only: a deliberately constant routine guarantees a false plateau, so
+direction (both paths), `sessions_in_window` and the >=4-session `stalled`
+rule use training sessions only (a NULL kind counts as training). A muscle
+trained only by habits reads `unknown`, not stalled, with its volume intact.
+
 Contract: <100ms on a 10K-row synthetic set (AGENTS.md checklist; -m slow guards).
 Deterministic given the logged data.
 """
@@ -80,9 +86,10 @@ from .metrics import epley_expr, est_1rm, qualifies_for_est_1rm
 def _fetch_entries(start: date, end: date) -> pl.DataFrame:
     """Entry-level rows: one row per exercise within a session."""
     sql = """
-        SELECT date, name, mg, sets, reps, rpe, weight_kg, form_quality, load_type
+        SELECT date, kind, name, mg, sets, reps, rpe, weight_kg, form_quality, load_type
         FROM (
             SELECT s.date,
+                   s.kind AS kind,
                    UNNEST(s.exercises).name AS name,
                    CAST(UNNEST(s.exercises).muscle_group AS VARCHAR) AS mg,
                    UNNEST(s.exercises).sets AS sets,
@@ -287,6 +294,11 @@ def get_specialization_trend(
     unloaded = int(per_set.filter(pl.col("weight_kg").is_null()).height)
 
     # --- trend across first vs second half of the window (by date) ---------
+    # habit sessions are volume-only: direction and session counting use
+    # training rows alone (NULL kind = legacy training)
+    is_training = pl.col("kind").fill_null("training") != "habit"
+    df = df.filter(is_training)
+    per_set = per_set.filter(is_training)
     sessions = df["date"].unique().sort().len()
     trend_direction = TrendDirection.unknown
     direction_basis: str | None = None
