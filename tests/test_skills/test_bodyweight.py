@@ -181,6 +181,27 @@ def test_snapshot_uses_only_fasted_7_day_mean():
     assert float(stored) == 66.5
 
 
+# --- P54: daily values first, then their mean (Nutrition ch02) ----------------
+
+def test_two_readings_on_one_day_weigh_once_in_the_fasted_mean():
+    _log(0, 60.0)
+    _log(0, 62.0)                 # same day: the day's value is 61
+    _log(1, 64.0)
+    assert generate_phase_snapshot().body_weight_kg == 62.5     # (61 + 64) / 2, not 62.0
+
+
+def test_summaries_average_daily_values_and_report_readings_and_days():
+    _log(0, 60.0)
+    _log(0, 62.0)
+    _log(1, 64.0)
+    _log(0, 70.0, "post_workout")
+    s = {a.condition.value: a for a in summarize(TODAY - timedelta(days=6), TODAY).averages}
+    assert (s["morning_fasted"].mean_kg, s["morning_fasted"].readings,
+            s["morning_fasted"].days) == (62.5, 3, 2)
+    assert (s["post_workout"].mean_kg, s["post_workout"].readings,
+            s["post_workout"].days) == (70.0, 1, 1)
+
+
 # --- migration 0005 ----------------------------------------------------------
 
 def _cfg(db):
