@@ -236,12 +236,17 @@ def main() -> None:
         print(json.dumps({"available": list(DISPATCH)}))
         return
     cmd = sys.argv[1]
-    args = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
     fn = DISPATCH.get(cmd)
     if fn is None:
         print(json.dumps({"error": f"unknown command '{cmd}'", "available": list(DISPATCH)}))
         sys.exit(2)
     try:
+        # the argument is parsed INSIDE the error contract: malformed JSON, or
+        # JSON that is not an object (handlers take a dict), is invalid_input —
+        # never a traceback (P27)
+        args = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+        if not isinstance(args, dict):
+            raise TypeError(f"arguments must be a JSON object, got {type(args).__name__}")
         result = fn(args)
         if hasattr(result, "model_dump_json"):
             print(result.model_dump_json(indent=2))

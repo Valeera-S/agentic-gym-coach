@@ -105,6 +105,31 @@ def test_injuries_seed_via_dispatch_rejects_bad_vocab():
         DISPATCH["injuries_seed"]({"location": "elbow", "status": "active", "severity": 3})
 
 
+# --- CLI argument parsing (P27) ------------------------------------------------
+
+@pytest.mark.parametrize("raw, exc", [
+    ("{bad json", "JSONDecodeError"),
+    ("", "JSONDecodeError"),
+    ("[1, 2]", "TypeError"),
+    ('"just a string"', "TypeError"),
+    ("null", "TypeError"),
+])
+def test_cli_rejects_malformed_or_non_object_json_with_the_error_contract(raw, exc):
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+    out = subprocess.run([sys.executable, "coach_tools.py", "sessions", raw],
+                         cwd=Path(__file__).resolve().parents[1],
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode == 1
+    assert "Traceback" not in out.stderr
+    payload = json.loads(out.stdout)
+    assert payload["error"] == "invalid_input"
+    assert payload["exception"] == exc
+    assert payload["detail"]
+
+
 # --- intake scan surface ------------------------------------------------------
 
 def test_intake_status_reports_missing_and_ready_flags():
