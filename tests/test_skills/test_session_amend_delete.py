@@ -431,6 +431,45 @@ def test_a_new_exercise_in_a_removed_ones_place_keeps_the_users_own_muscle():
                                    "exercises": [_as_input(x) for x in d["exercises"]]})
 
 
+def test_a_rename_does_not_carry_a_caller_set_muscle_unless_restated_explicitly():
+    """P23: a muscle the caller/user had set (triceps) survived a rename to an
+    unrelated back exercise just because the amend was built from the detail
+    read-back (which carries the stored muscle_group)."""
+    conf = log_session(SessionInput(date=D, exercises=[
+        ExerciseModel(name="Barbell Bench Press", muscle_group="triceps", sets=1, reps=[5])]))
+    sid = str(conf.session_id)
+    d = _detail(sid)
+    assert (d["exercises"][0]["muscle_group"], d["exercises"][0]["muscle_source"]) == \
+        ("triceps", "caller")
+    copied = dict(_as_input(d["exercises"][0]), name="Lat Pulldown")   # muscle_group: triceps
+    out = DISPATCH["session_amend"]({"session_id": sid, "date": d["date"], "exercises": [copied]})
+    row = _detail(sid)["exercises"][0]
+    assert (row["name"], row["muscle_group"], row["muscle_source"]) == ("Lat Pulldown", "lats", "catalog")
+    details = [f["detail"] for f in out["anomaly_flags"] if f["code"] == "amend_not_applied"]
+    assert any("muscle_group triceps" in x and "Barbell Bench Press" in x
+               and "confirm_muscle" in x for x in details)
+    # an explicit confirmation keeps it ...
+    DISPATCH["session_amend"]({"session_id": sid, "date": d["date"], "exercises": [
+        dict(copied, name="Lat Pulldown", confirm_muscle=True, muscle_group="lats")]})
+    # ... as does naming a muscle that differs from the old exercise's
+    DISPATCH["session_amend"]({"session_id": sid, "date": d["date"], "exercises": [
+        {"index": 0, "name": "Cable Row", "sets": 1, "reps": [5], "muscle_group": "biceps"}]})
+    row = _detail(sid)["exercises"][0]
+    assert (row["name"], row["muscle_group"], row["muscle_source"]) == ("Cable Row", "biceps", "caller")
+
+
+def test_a_rename_with_confirm_muscle_keeps_a_caller_set_muscle():
+    conf = log_session(SessionInput(date=D, exercises=[
+        ExerciseModel(name="Barbell Bench Press", muscle_group="triceps", sets=1, reps=[5])]))
+    sid = str(conf.session_id)
+    d = _detail(sid)
+    out = DISPATCH["session_amend"]({"session_id": sid, "date": d["date"], "exercises": [
+        dict(_as_input(d["exercises"][0]), name="Lat Pulldown", confirm_muscle=True)]})
+    row = _detail(sid)["exercises"][0]
+    assert (row["muscle_group"], row["muscle_source"]) == ("triceps", "caller")
+    assert not [f for f in out["anomaly_flags"] if "muscle_group" in f["detail"]]
+
+
 def test_a_dropped_copied_muscle_is_reported():
     sid = _log_typed()
     d = _detail(sid)

@@ -346,11 +346,13 @@ def _provenance_to_keep(exercises: list, stored: list[dict] | None,
         equals the stored kg loads of a weight + unit entry.
     A referenced exercise of a DIFFERENT identity is a rename: it keeps only
     the weight + unit as entered (same rule), and values copied from the old
-    exercise that were NOT the user's own are not applied to the new name —
-    a `muscle_group` equal to its stored non-caller muscle (unless
-    `confirm_muscle`), and a `load_type` equal to its stored one where the
-    new identity's default differs (that default applies). A caller-set
-    muscle carries over. Each value not applied that changes the result is
+    exercise are not applied to the new name — a `muscle_group` equal to its
+    stored muscle (unless `confirm_muscle`; a caller-set muscle is no
+    exception — it belonged to the old exercise, and an unrelated new one
+    must not inherit it), and a `load_type` equal to its stored one where the
+    new identity's default differs (that default applies). A muscle_group
+    that differs from the stored one is the caller's own choice and is kept.
+    Each value not applied that changes the result is
     returned as an `amend_not_applied` flag naming it; restate it to apply it
     (`confirm_muscle`, or a follow-up amend for load_type).
     Changed values go through as changes.
@@ -396,19 +398,24 @@ def _provenance_to_keep(exercises: list, stored: list[dict] | None,
 
 
 def _not_carried_on_rename(ex, replaced: dict, restated_muscle: bool) -> list[AnomalyFlag]:
-    """Drop values a renamed exercise copied from the one it replaces, unless
-    they were the user's own; one flag per value that changes the result."""
+    """Drop values a renamed exercise copied from the one it replaces; one flag
+    per value that changes the result. A muscle_group equal to the old
+    exercise's is a copy whoever set it there — a caller-set one included —
+    unless `confirm_muscle` restates it (a different muscle_group is the
+    caller's own explicit choice and is kept)."""
     flags: list[AnomalyFlag] = []
     new = classify(ex.name)
     old_name = replaced.get("name") or "(nameless entry)"
-    if restated_muscle and replaced.get("muscle_source") != MuscleSource.caller.value:
+    if restated_muscle:
         given = ex.muscle_group
         ex.muscle_group = None  # derived for the new name, like a fresh log
         if new.muscle_group is not given:
+            was = ("set by the caller on" if replaced.get("muscle_source")
+                   == MuscleSource.caller.value else "stored on")
             flags.append(AnomalyFlag(code=AnomalyCode.amend_not_applied, detail=(
-                f"{new.name}: muscle_group {given.value} matched the replaced exercise "
-                f"'{old_name}' and was not applied; resend it with confirm_muscle: true "
-                "if the user stated it")))
+                f"{new.name}: muscle_group {given.value} ({was} the replaced exercise "
+                f"'{old_name}') was not applied to the new exercise; resend it with "
+                "confirm_muscle: true if the user stated it")))
     default = default_load_type(new.name)
     if (ex.load_type is not None and ex.load_type.value == replaced.get("load_type")
             and ex.load_type is not default):

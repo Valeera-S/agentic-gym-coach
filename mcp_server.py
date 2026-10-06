@@ -170,9 +170,10 @@ def coach_session_amend(session_id: str, date: str, exercises: list[dict],
     (raw name, weight + unit, load_type, muscle provenance; an older entry whose name the catalog
     now maps to another identity is canonicalized, with that name kept as its raw_name). Omit
     muscle_group to re-derive it (fixes an old guess); confirm_muscle=true records it as the user's;
-    on a rename (same index, different exercise) a muscle_group copied from the old exercise that is
-    not recorded as the user's own, or any load_type copied from it, is not applied (flagged
-    amend_not_applied where that changes the result).
+    on a rename (same index, different exercise) a muscle_group equal to the old exercise's (even
+    one the user had set; confirm_muscle=true keeps it, a different muscle_group is your own
+    choice), or any load_type copied from it, is not applied (flagged amend_not_applied where
+    that changes the result).
     Returns the session-level values now stored.
     The complete previous version is written to the audit trail. Unknown id -> invalid_input.
     """
