@@ -15,7 +15,7 @@ Contents:
     Today’s planned workout (from sessions table where date = today)
     Last 3 sessions of same exercises (via get_specialization_trend)
     Active injury flags (via check_exercise_safety)
-    Current phase parameters (from latest phase_snapshots)
+    Current phase (the most recent training session’s phase; the latest phase_snapshots row only before any training session exists)
     Pre-session recovery score (via compute_recovery_score)
     Weeks since the last logged training session (habit sessions excluded) (staleness context for the intake’s confirm-present step)
 Lifecycle: Loaded at session init → Updated in real-time during logging → Discarded at session end (persisted changes already written to Tier 2).

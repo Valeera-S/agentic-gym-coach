@@ -3,8 +3,15 @@
 One definition, previously copy-pasted in three places with diverging
 fallbacks (orchestrator / snapshot / session_logger):
 
-    current_phase(): latest phase_snapshots row → modal phase across logged
-    TRAINING sessions (habit sessions excluded) → None (no data at all).
+    current_phase(): the phase of the most recent TRAINING session (habit
+    sessions never decide it) → only when there is no training session at all,
+    the latest phase_snapshots row → None (no data at all).
+
+    "Most recent" is by (date, created_at, id), newest first, so a session
+    backfilled with an older date never moves the phase, and same-day sessions
+    resolve by creation order. The snapshot row is deliberately NOT read first:
+    generate_phase_snapshot() writes current_phase() back into that table, so
+    reading it first froze the phase after the first snapshot (P45).
 
     phase_for_logging(): the phase to TAG a new session with — explicit user
     input wins, then current_phase(), then `maintenance` (the goal-agnostic
@@ -20,25 +27,23 @@ from .init import get_duckdb
 
 
 def current_phase() -> PhaseType | None:
-    """Latest snapshot's phase, else the modal phase across training sessions
-    (habits excluded), else None.
+    """Phase of the most recent training session, else the latest snapshot's
+    phase (only when no training session exists), else None.
 
-    The modal phase is a total order: most sessions wins; a tie goes to the
-    phase whose latest session is most recent (the program moved there last);
-    a remaining tie goes to the phase name ascending. Deterministic for any
-    data (P25)."""
+    A legacy training session with a NULL phase is skipped (it states no
+    phase); the next most recent one decides."""
     row = get_duckdb().execute(
-        "SELECT phase FROM phase_snapshots ORDER BY snapshot_date DESC LIMIT 1"
+        "SELECT phase FROM sessions WHERE kind = 'training' AND phase IS NOT NULL "
+        "ORDER BY date DESC, created_at DESC, id DESC LIMIT 1"
     ).fetchone()
     if row and row[0]:
         return PhaseType(row[0])
+    # a session that exists but carries no phase still beats a stale snapshot
+    if get_duckdb().execute(
+            "SELECT 1 FROM sessions WHERE kind = 'training' LIMIT 1").fetchone():
+        return None
     row = get_duckdb().execute(
-        # training sessions only: one habit entry a day would otherwise
-        # outvote the program's actual phase. TOTAL order (P25): most
-        # sessions, then the phase of the latest session, then phase name —
-        # a tie must never fall to GROUP BY's arbitrary order.
-        "SELECT phase FROM sessions WHERE kind = 'training' "
-        "GROUP BY phase ORDER BY count(*) DESC, max(date) DESC, phase ASC LIMIT 1"
+        "SELECT phase FROM phase_snapshots ORDER BY snapshot_date DESC LIMIT 1"
     ).fetchone()
     return PhaseType(row[0]) if row and row[0] else None
 

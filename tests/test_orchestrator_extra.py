@@ -64,18 +64,17 @@ def test_phase_fallback_no_data_is_none():
     assert wm.phase is None
 
 
-def test_phase_fallback_modal_session_phase_when_no_snapshot():
+def test_phase_is_the_most_recent_training_sessions():
     import orchestrator
     _log(T - timedelta(days=1), phase="cut")
     _log(T - timedelta(days=2), phase="cut")
     _log(T - timedelta(days=3), phase="deload")
     wm = orchestrator.initialize_session(today=T)
-    assert wm.phase == PhaseType.cut  # modal wins (2x cut vs 1x deload)
+    assert wm.phase == PhaseType.cut  # the latest session (T-1) decides, not a count
 
 
-def test_phase_fallback_latest_snapshot_wins():
+def test_phase_fallback_snapshot_only_without_training_sessions():
     import orchestrator
-    _log(T - timedelta(days=1), phase="cut")
     get_duckdb().execute(
         "INSERT INTO phase_snapshots (snapshot_date, phase, specialization_lifts, "
         "tendon_status_summary, key_insight, next_phase_adjustment) "
@@ -84,6 +83,9 @@ def test_phase_fallback_latest_snapshot_wins():
     )
     wm = orchestrator.initialize_session(today=T)
     assert wm.phase == PhaseType.realization
+    # P45: once a training session exists, it (not the stale snapshot) decides
+    _log(T - timedelta(days=1), phase="cut")
+    assert orchestrator.initialize_session(today=T).phase == PhaseType.cut
 
 
 def test_initialize_session_trends_cover_all_priorities():
