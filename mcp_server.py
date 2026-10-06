@@ -123,7 +123,7 @@ def coach_recovery(date: str | None = None) -> dict:
 def coach_trend(muscle: str,
                 window_days: StrictInt = coach_tools.DEFAULT_TREND_WINDOW_DAYS,
                 end_date: str | None = None) -> dict:
-    """Effective hard sets, avg RPE, est 1RM (≤6-rep sets), trend direction (judged per exercise identity, counting only exercises for which the muscle is a chart primary: identities with heavy (<=6-rep) sets in both window halves vote on est-1RM, otherwise direction falls to each exercise's own performance: more load at >= the same reps, more reps at the same load, or a load step whose heavier sets all stay >= 6 reps without a lower Epley estimate — HEURISTIC, never reported; bodyweight exercises compare by dominance only; unlogged weights are unknown, never 0; detail.direction_basis and detail.identity_directions show which basis and which exercises decided), and stall flag for a muscle group over a window (detail block: tonnage = total external load, x2 for per_hand/per_side readings; load_type_unknown_sets; unloaded/overlap sets)."""
+    """Effective hard sets, avg RPE, est 1RM (≤6-rep sets), trend direction (judged per exercise identity, counting only exercises for which the muscle is a chart primary: identities with heavy (<=6-rep) sets in both window halves vote on est-1RM, otherwise direction falls to each exercise's own performance: more load at >= the same reps, more reps at the same load, or a load step whose heavier sets all stay >= 6 reps without a lower Epley estimate — HEURISTIC, never reported; bodyweight exercises compare by dominance only; unlogged weights are unknown, never 0; detail.direction_basis and detail.identity_directions show which basis and which exercises decided), and stall flag for a muscle group over a window (detail block: tonnage = total external load, x2 for per_hand/per_side readings; load_type_unknown_sets; unloaded/overlap sets; unrecorded_reps_sets = counted sets with no recorded rep count; direction_sessions = training sessions holding a direction-deciding exercise for the muscle - the >= 4 gate for direction and stalled counts these, while sessions_in_window counts any session crediting volume; direction_reason {code, text} whenever direction is unknown - e.g. only_habit_sessions means trained by a habit, not untrained)."""
     return _run("trend", {"muscle": muscle, "window_days": window_days, "end_date": end_date})
 
 
@@ -227,7 +227,7 @@ def coach_bodyweight_history(window_days: StrictInt = coach_tools.DEFAULT_BODYWE
                              end_date: str | None = None) -> dict:
     """Bodyweight readings over a window (window_days calendar days ending at end_date inclusive, default today)
     plus, PER CONDITION, the mean, the reading count (`readings`) and the number of distinct days behind it (`days`; the mean is of daily values) for the last 7 days and for the whole window.
-    Conditions are never mixed in one average - compare like with like (Nutrition ch02 weekly averages)."""
+    Conditions are never mixed in one average - compare like with like (Nutrition ch02 weekly averages). kg values are rounded to 2 decimals in this output; the stored reading and the entered value + unit stay exact."""
     return _run("bodyweight_history", {"window_days": window_days, "end_date": end_date})
 
 
