@@ -13,7 +13,9 @@ for equal hypertrophy). Rules:
     still credits its identity's muscles
   - form_quality < 3 discounts a set 50% (SPEC §1.3) — effective hard sets only,
     never tonnage (P48)
-  - a RECORDED 0-rep set is not a hard set (P55); an unrecorded rep count still is
+  - a RECORDED 0-rep set is not a hard set (P55); an unrecorded rep count still
+    is — `detail.unrecorded_reps_sets` says how many of the effective sets in
+    the total have no recorded rep count (P62)
   - bodyweight/unloaded sets are hard sets (count 1.0 each); tonnage is
     reported in `detail` for reference only, as total external load:
     weight_kg is the reading on the implement, so per_hand / per_side loads
@@ -178,10 +180,15 @@ def _fetch_entries(start: date, end: date) -> pl.DataFrame:
     """
     df = get_duckdb().execute(sql, [start, end]).pl()
     # P55: a recorded 0-rep set is not a hard set; an unrecorded count still is
-    return df.with_columns((
-        pl.col("sets").fill_null(0)
-        - pl.col("reps").list.eval(pl.element() <= 0).list.sum().fill_null(0)
-    ).alias("hard_sets"))
+    return df.with_columns(
+        (pl.col("sets").fill_null(0)
+         - pl.col("reps").list.eval(pl.element() <= 0).list.sum().fill_null(0)
+         ).alias("hard_sets"),
+        # P62: the sets among them whose rep count was not recorded (reps are
+        # padded to `sets`, so a missing array counts every set)
+        pl.col("reps").list.eval(pl.element().is_null()).list.sum().fill_null(0)
+        .alias("unrecorded_sets"),
+    )
 
 
 # Load types whose reading is ONE limb's load while both limbs work.
@@ -408,7 +415,7 @@ def get_specialization_trend(
                     "direction_reason": _reason(
                         "no_sessions", "no session in the window credits this muscle"),
                     "load_type_unknown_sets": 0,
-                    "unloaded_sets": 0, "overlap_sets": 0.0,
+                    "unloaded_sets": 0, "overlap_sets": 0.0, "unrecorded_reps_sets": 0.0,
                     "direction_basis": None, "identity_directions": {}},
         )
 
@@ -426,6 +433,9 @@ def get_specialization_trend(
         df.filter(pl.col("is_overlap"))
         .select((pl.col("hard_sets") * pl.col("form_mult")).sum()).item() or 0.0
     )
+
+    unrecorded_reps_sets = df.select(
+        (pl.col("unrecorded_sets") * pl.col("form_mult")).sum()).item() or 0.0
 
     # --- per-set metrics (reference only) ----------------------------------
     # empty_as_null=True is Polars' CURRENT default (an empty array becomes one
@@ -511,6 +521,8 @@ def get_specialization_trend(
             "load_type_unknown_sets": load_type_unknown,
             "unloaded_sets": unloaded,
             "overlap_sets": float(overlap_sets),
+            # effective sets inside effective_volume whose rep count was not recorded (P62)
+            "unrecorded_reps_sets": float(unrecorded_reps_sets),
             "direction_basis": direction_basis,  # est_1rm | performance | None (<4 sessions)
             "identity_directions": identity_directions,  # one verdict per voting identity
         },
