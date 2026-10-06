@@ -607,3 +607,34 @@ class SessionDetail(BaseModel):
     created_at: datetime | None = None
     exercises: list[ExerciseDetail] = Field(default_factory=list)
     needs_review_count: int = 0
+
+
+class SessionTemplate(BaseModel):
+    """Return of skills.session_templates.session_template(): a stored session as
+    a ready-to-log payload (UX3 "same as last time"). `exercises` holds EXACT
+    coach_log_session exercise inputs (plain dicts on purpose - they are re-sent
+    verbatim; a documented exception to "skills return models"), carrying only
+    what repeats: name, sets, reps, weight + unit as entered, load_type, tempo,
+    and muscle_group when the caller had set it. Per-day observations (rpe,
+    pain_flag, notes, form_quality, post_feedback, pre_recovery_score) are never
+    copied. `skipped` names stored entries that cannot be re-logged (a nameless
+    older entry)."""
+
+    source_session_id: UUID
+    source_date: date
+    label: str | None = None
+    kind: str = "training"
+    exercises: list[dict] = Field(default_factory=list)
+    skipped: list[str] = Field(default_factory=list)
+
+
+class LabelSummary(BaseModel):
+    """One label in use (session_labels): the stored spelling of its most recent
+    session, kind of that session, how many sessions carry it (normalized), the
+    most recent date, and whole days since then (0 = logged today)."""
+
+    label: str
+    kind: str
+    count: int
+    last_date: date
+    days_without_entry: int

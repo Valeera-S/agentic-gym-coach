@@ -54,6 +54,8 @@ from .session import (
     RemovedExercise,
     SessionChange,
     SessionDetail,
+    SessionTemplate,
+    LabelSummary,
     SessionInput,
     SessionModel,
 )
@@ -96,6 +98,8 @@ __all__ = [
     "RemovedExercise",
     "SessionChange",
     "SessionDetail",
+    "SessionTemplate",
+    "LabelSummary",
     "LogConfirmation",
     "SessionInput",
     "SessionModel",
