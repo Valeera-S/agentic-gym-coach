@@ -39,7 +39,7 @@ Volume currency = effective hard sets per muscle per week: sets × form_mult (fo
 - metrics — shared Epley/est-1RM helpers (single definition)
 - phase.current_phase()/phase_for_logging() — single phase resolver: current phase = the phase of the most recent training session (date, created_at, id; habits never decide); the latest phase_snapshots row only when no training session exists
 - snapshot.generate_phase_snapshot() -> PhaseSnapshot (incl. computed block_state + session_gap); session_gap(today) -> weeks since the last training session (habits excluded) + staleness verdict (threshold REASSESSMENT_GAP_WEEKS, a labeled heuristic)  (<200ms)
-- bodyweight.log_bodyweight(BodyweightInput) -> BodyweightReading; list_readings(start, end) (read outputs round kg to 2 decimals; stored kg and entered value + unit stay exact); summarize(start, end) -> mean + reading count + distinct days per condition (ConditionAverage: condition, readings, days, mean_kg; never blended); bodyweight_history(window_days, end) -> readings + last-7-days and window summaries (window_start semantics: N calendar days ending at end, inclusive); fasted_mean_7d(end) feeds the snapshot
+- bodyweight.log_bodyweight(BodyweightInput) -> BodyweightReading; list_readings(start, end) (read outputs round kg to 2 decimals; stored kg and entered value + unit stay exact); summarize(start, end) -> mean + reading count + distinct days per condition (ConditionAverage: condition, readings, days, mean_kg; never blended); bodyweight_history(window_days, end) -> readings + last-7-days and window summaries (window_start semantics: N calendar days ending at end, inclusive); fasted_mean_7d(end) feeds the snapshot; amend_bodyweight(args) / delete_bodyweight(id) -> BodyweightChange (P74: omitted fields keep their stored value, `clear` removes scale / notes, the merged result is validated like a fresh BodyweightInput, an amend that stores the row as it was writes no audit and replies `changed: false`; the complete pre-change row goes to decision_log.payload as a `bodyweight_amend` / `bodyweight_delete` entry in the same transaction)
 - intake.assess_intake() -> IntakeReport — standardized bucket-list scan (models/intake.py INTAKE_CHECKLIST): collected vs missing per field, soft per-domain readiness gates; read-only
 - profile.get_profile()/set_profile()/merge_profile() (coach_profile_set merges: absent keys keep, null clears)/derive_priority_muscles()
 - memory.add_note()/search_notes()  (Tier 3, manual-save policy)
@@ -47,7 +47,7 @@ Volume currency = effective hard sets per muscle per week: sets × form_mult (fo
 
 4. SURFACES
 - CLI: python coach_tools.py <cmd> '<json>' (JSON stdout; {"error":...} + exit 1)
-- MCP: mcp_server.py (stdio; 18 coach tools + coach_doctrine) — the cross-runtime tool surface. Each tool call opens the DB and releases it on return (an idle server never locks the file).
+- MCP: mcp_server.py (stdio; 20 coach tools + coach_doctrine) — the cross-runtime tool surface. Each tool call opens the DB and releases it on return (an idle server never locks the file).
 - Persona: docs/COACH_PROMPT.md (canonical; renderable into native agent files via scripts/sync_adapters.py)
 - See docs/adapters.md. (The v1/v2 opencode native adapter was removed — MCP is the single tool surface.)
 

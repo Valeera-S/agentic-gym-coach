@@ -162,4 +162,6 @@ class DecisionEventType(str, Enum):
     session_amend = "session_amend"    # payload: the complete pre-change row
     session_delete = "session_delete"  # payload: the complete deleted row
     session_restore = "session_restore"  # payload: the row it overwrote (before), the restored row (after)
+    bodyweight_amend = "bodyweight_amend"    # payload: the complete pre-change reading (before), the new one (after)
+    bodyweight_delete = "bodyweight_delete"  # payload: the complete deleted reading
     sessions_reset = "sessions_reset"  # ingest_log --reset; payload: {deleted, ingested, source}

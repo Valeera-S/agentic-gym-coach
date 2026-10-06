@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from datetime import date as Date, datetime
 from enum import Enum
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -108,3 +109,15 @@ class BodyweightHistory(BaseModel):
     readings: list[BodyweightReading]
     last_7_days: BodyweightSummary
     window: BodyweightSummary
+
+
+class BodyweightChange(BaseModel):
+    """Return of skills.bodyweight.amend_bodyweight() / delete_bodyweight()."""
+
+    action: Literal["amended", "deleted"]
+    id: UUID
+    audit_id: UUID | None            # decision_log row holding the pre-change row
+    #                                  (None when an amend changed nothing: no entry is written)
+    changed: bool = True             # amend: False when the reading would be stored as it was
+    reading: BodyweightReading       # amend: the reading as now stored; delete: the one removed
+    message: str = ""

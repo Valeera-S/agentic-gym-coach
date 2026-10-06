@@ -123,7 +123,7 @@ Memory Tier   Auto-Write Allowed?   Approval Required?   Validation Layer
 Tier 1 (Working)   Yes (session-scoped)   No   Pydantic runtime validation
 
 Tier 2 (Episodic)   Yes (structured logs)   No   Schema constraints + unit tests
-Tier 2 (corrections: coach_session_amend / coach_session_delete)   No   YES (read back via coach_session_detail, explicit user yes)   A fresh log's validation (stricter input: index/new link, read-back keys rejected) + full pre-change row in decision_log.payload
+Tier 2 (corrections: coach_session_amend / coach_session_delete; coach_bodyweight_amend / coach_bodyweight_delete)   No   YES (read back via coach_session_detail / coach_bodyweight_history, explicit user yes)   A fresh log's validation (stricter input: index/new link, read-back keys rejected) + full pre-change row in decision_log.payload
 
 Tier 2 (Summaries)   Yes (auto-generated)   No   Compression skill unit tests
 

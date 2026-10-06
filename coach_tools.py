@@ -245,6 +245,18 @@ def cmd_bodyweight_log(args: dict):
     return log_bodyweight(inp).model_dump(mode="json")
 
 
+@_accepts("id", "date", "condition", "weight", "unit", "weight_kg", "scale", "notes", "clear")
+def cmd_bodyweight_amend(args: dict):
+    from skills.bodyweight import amend_bodyweight
+    return amend_bodyweight(args).model_dump(mode="json")  # validated before any write
+
+
+@_accepts("id")
+def cmd_bodyweight_delete(args: dict):
+    from skills.bodyweight import delete_bodyweight
+    return delete_bodyweight(_require(args, "id")).model_dump(mode="json")
+
+
 @_accepts("window_days", "end_date")
 def cmd_bodyweight_history(args: dict):
     from skills.bodyweight import bodyweight_history
@@ -368,6 +380,8 @@ _HANDLERS = {
     "session_amend": cmd_session_amend,
     "session_delete": cmd_session_delete,
     "bodyweight_log": cmd_bodyweight_log,
+    "bodyweight_amend": cmd_bodyweight_amend,
+    "bodyweight_delete": cmd_bodyweight_delete,
     "bodyweight_history": cmd_bodyweight_history,
     "injuries_list": cmd_injuries_list,
     "injuries_seed": cmd_injuries_seed,

@@ -224,6 +224,34 @@ def coach_bodyweight_log(date: str, condition: str, weight: StrictNum | None = N
 
 
 @mcp.tool()
+def coach_bodyweight_amend(id: str, date: str | None = None, condition: str | None = None,
+                           weight: StrictNum | None = None, unit: str | None = None,
+                           weight_kg: StrictNum | None = None, scale: str | None = None,
+                           notes: str | None = None, clear: list[str] | None = None) -> dict:
+    """Correct one bodyweight reading by `id` (from coach_bodyweight_history). ONLY after showing the
+    user the stored reading and the correction and getting their explicit yes.
+
+    Every field omitted or null KEEPS its stored value: send only what changes (date, condition, a new
+    weight as weight + unit or weight_kg - which replaces the stored value and its entered unit - scale,
+    notes). To REMOVE a stored scale / notes, name it in `clear`. The result is validated exactly like
+    a fresh coach_bodyweight_log (date between 2000-01-01 and today, condition vocabulary, bounds, clean
+    text, strict types) before anything is written. The complete previous row is written to the audit
+    trail. Returns the reading as now stored and `changed`: false (audit_id null, no audit entry) when
+    it is stored exactly as before. Unknown or malformed id -> invalid_input."""
+    return _run("bodyweight_amend", {"id": id, "date": date, "condition": condition,
+                                     "weight": weight, "unit": unit, "weight_kg": weight_kg,
+                                     "scale": scale, "notes": notes, "clear": clear or []})
+
+
+@mcp.tool()
+def coach_bodyweight_delete(id: str) -> dict:
+    """Permanently delete one bodyweight reading by `id` (from coach_bodyweight_history). ONLY after
+    showing the user the reading and getting their explicit confirmation. Its complete row is written to
+    the audit trail first. Unknown or malformed id -> invalid_input."""
+    return _run("bodyweight_delete", {"id": id})
+
+
+@mcp.tool()
 def coach_bodyweight_history(window_days: StrictInt = coach_tools.DEFAULT_BODYWEIGHT_WINDOW_DAYS,
                              end_date: str | None = None) -> dict:
     """Bodyweight readings over a window (window_days calendar days ending at end_date inclusive, default today)
