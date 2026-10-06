@@ -276,3 +276,19 @@ def test_cli_listing_and_detail_never_import_polars(tmp_path, cmd, arg):
     out = subprocess.run([sys.executable, "-c", probe, cmd, arg], cwd=_REPO, env=env,
                          capture_output=True, text=True, timeout=60)
     assert "MODULES False False" in out.stdout, out.stdout + out.stderr
+
+
+def test_null_per_set_arrays_read_back_padded_like_trend_and_snapshot_do():
+    """P32: a stored NULL / empty per-set array is "unrecorded for every set",
+    which the analytics pad to [None] * sets; the read-back must say the same."""
+    get_duckdb().execute(
+        "INSERT INTO sessions (date, phase, exercises) VALUES (DATE '2026-09-19', 'maintenance', ?)",
+        [[{"name": "Fly", "muscle_group": "chest", "sets": 3},
+          {"name": "Row", "muscle_group": "lats", "sets": 2, "reps": [], "rpe": [],
+           "weight_kg": []},
+          {"name": "Dip", "muscle_group": "chest", "sets": 2, "reps": [8, 8]}]])
+    (s,) = _detail(date="2026-09-19")
+    fly, row, dip = s["exercises"]
+    for ex, n in ((fly, 3), (row, 2)):
+        assert ex["reps"] == ex["rpe"] == ex["weight_kg"] == ex["weight_as_entered"] == [None] * n
+    assert dip["reps"] == [8, 8] and dip["rpe"] == [None, None]
