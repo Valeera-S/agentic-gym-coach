@@ -79,6 +79,14 @@ direction (both paths), `sessions_in_window` and the >=4-session `stalled`
 rule use training sessions only (a NULL kind counts as training). A muscle
 trained only by habits reads `unknown`, not stalled, with its volume intact.
 
+Whenever direction is `unknown`, `detail.direction_reason` = {code, text} says
+why (P59; None when a direction was reached). Codes: `no_sessions` (nothing in
+the window credits the muscle), `only_habit_sessions` (volume exists but only
+from habits — not "untrained"), `too_few_direction_sessions` (fewer than 4
+direction sessions; the text states the count and the threshold),
+`no_comparable_identity` (>= 4 direction sessions but no identity with a
+recorded load in both halves).
+
 Contract: <100ms on a 10K-row synthetic set (AGENTS.md checklist; -m slow guards).
 Deterministic given the logged data.
 """
@@ -105,6 +113,11 @@ from .metrics import epley_expr, est_1rm, qualifies_for_est_1rm
 
 
 MIN_DIRECTION_SESSIONS = 4  # direction / `stalled` need this many direction sessions
+
+
+def _reason(code: str, text: str) -> dict[str, str]:
+    """`detail.direction_reason`: a stable code plus short text (P59)."""
+    return {"code": code, "text": text}
 
 
 def window_start(end: date, window_days: int) -> date:
@@ -391,7 +404,10 @@ def get_specialization_trend(
             muscle=muscle, window_days=window_days, effective_volume=0.0,
             avg_rpe=None, est_1rm_kg=None, stalled=False,
             trend_direction=TrendDirection.unknown, sessions_in_window=0,
-            detail={"direction_sessions": 0, "load_type_unknown_sets": 0,
+            detail={"direction_sessions": 0,
+                    "direction_reason": _reason(
+                        "no_sessions", "no session in the window credits this muscle"),
+                    "load_type_unknown_sets": 0,
                     "unloaded_sets": 0, "overlap_sets": 0.0,
                     "direction_basis": None, "identity_directions": {}},
         )
@@ -462,6 +478,23 @@ def get_specialization_trend(
                 df, first_ids)
             direction_basis = "performance"
 
+    direction_reason: dict[str, str] | None = None
+    if trend_direction is TrendDirection.unknown:
+        if sessions == 0:  # rows exist (else returned above), all of them habit
+            direction_reason = _reason(
+                "only_habit_sessions",
+                "only habit sessions credit this muscle in the window: their volume counts, "
+                "but habits never decide direction (this is not 'untrained')")
+        elif direction_sessions < MIN_DIRECTION_SESSIONS:
+            direction_reason = _reason(
+                "too_few_direction_sessions",
+                f"{direction_sessions} direction-eligible training session(s) in the window; "
+                f"direction needs at least {MIN_DIRECTION_SESSIONS}")
+        else:
+            direction_reason = _reason(
+                "no_comparable_identity",
+                "no exercise with a recorded load was done in both halves of the window")
+
     stalled = trend_direction in (TrendDirection.plateau, TrendDirection.down)
 
     return TrendReport(
@@ -473,6 +506,7 @@ def get_specialization_trend(
         sessions_in_window=int(sessions),
         detail={
             "direction_sessions": int(direction_sessions),
+            "direction_reason": direction_reason,  # {code, text} when unknown, else None
             "tonnage_kg": round(float(tonnage), 1),
             "load_type_unknown_sets": load_type_unknown,
             "unloaded_sets": unloaded,
